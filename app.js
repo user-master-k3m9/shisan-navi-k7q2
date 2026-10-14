@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v7';
+const VER='v8';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -104,7 +104,7 @@ function render(){
   const m=$('#main');
   if(S.detail!=null)return (typeof S.detail==='string'?renderTxDetail:renderDetail)(m);
   if(TX.mode==='tx'&&['search','list','map'].includes(S.tab))return ({search:renderTxSearch,list:renderTxList,map:renderTxMap})[S.tab](m);
-  ({search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav})[S.tab](m);
+  ({search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav,links:renderLinks})[S.tab](m);
 }
 
 // ---------- さがす ----------
@@ -245,16 +245,11 @@ function popHtml(m){
 function linksHtml(lat,lon,code,addr){
   const pref=PREFS.find(x=>x[0]===code.slice(0,2))||PREFS[0];
   const su=bs=>`https://suumo.jp/jj/bukken/ichiran/JJ012FC001/?ar=030&bs=${bs}&ta=${pref[0]}&sc=${code}`;
-  return `<h3>この地域の売り物件をさがす</h3>
-  <div class="links">
-    <a class="btn sub sm" target="_blank" rel="noopener" href="${su('011')}">SUUMO 中古マンション</a>
-    <a class="btn sub sm" target="_blank" rel="noopener" href="${su('021')}">SUUMO 中古一戸建て</a>
-    <a class="btn sub sm" target="_blank" rel="noopener" href="${su('030')}">SUUMO 土地</a>
-    <a class="btn sub sm" target="_blank" rel="noopener" href="https://www.athome.co.jp/mansion/chuko/${pref[2]}/list/">アットホーム 中古マンション</a>
-    <a class="btn sub sm" target="_blank" rel="noopener" href="https://www.athome.co.jp/kodate/chuko/${pref[2]}/list/">アットホーム 中古一戸建て</a>
-    <a class="btn sub sm" target="_blank" rel="noopener" href="https://www.athome.co.jp/tochi/${pref[2]}/list/">アットホーム 土地</a>
-  </div>
-  <div class="note">SUUMOは市区町村まで、アットホームは都県の一覧が開きます（アットホームは画面で市区町村を選んでください）。気になる物件は「物件を評価」に住所と価格を入れると評価できます。</div>
+  const mu=D.muni[code];
+  return `<h3>この地域の売り物件をさがす（外部サイト）</h3>
+  ${linkGroups(pref[0],code).slice(0,2).map(g=>linkGroupHtml(g)).join('')}
+  <div class="note">SUUMOは${mu?esc(mu[1]):'市区町村'}まで、ほかのサイトは${esc(pref[1])}の一覧が開きます。気になる物件は「物件を評価」に住所と価格を入れると評価できます。</div>
+  <button class="btn sub sm" style="margin-top:6px" onclick="go('links')">ほかの外部リンクを見る</button>
   <h3>確認用リンク</h3>
   <div class="links">
     <a class="btn sub sm" target="_blank" rel="noopener" href="https://disaportal.gsi.go.jp/maps/?ll=${lat},${lon}&z=16&base=pale&vs=c1j0l0u0t0h0z0">重ねるハザードマップ</a>
@@ -465,3 +460,34 @@ async function boot(){
 }
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');let r=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!r){r=true;location.reload()}})}
 boot();
+
+// ---------- 外部リンク ----------
+function linkGroups(pc,code){
+  const p=PREFS.find(x=>x[0]===pc)||PREFS[0],sl=p[2],sc=code?`&sc=${code}`:'';
+  const su=bs=>`https://suumo.jp/jj/bukken/ichiran/JJ012FC001/?ar=030&bs=${bs}&ta=${pc}${sc}`;
+  return [
+    {h:'売り物件（中古マンション・戸建て・土地）',l:[
+      ['SUUMO 中古マンション',su('011')],['SUUMO 中古一戸建て',su('021')],['SUUMO 土地',su('030')],
+      ['アットホーム 中古マンション',`https://www.athome.co.jp/mansion/chuko/${sl}/list/`],['アットホーム 中古一戸建て',`https://www.athome.co.jp/kodate/chuko/${sl}/list/`],['アットホーム 土地',`https://www.athome.co.jp/tochi/${sl}/list/`],
+      ["LIFULL HOME'S 中古マンション",`https://www.homes.co.jp/mansion/chuko/${sl}/list/`],["LIFULL HOME'S 中古一戸建て",`https://www.homes.co.jp/kodate/chuko/${sl}/list/`],["LIFULL HOME'S 土地",`https://www.homes.co.jp/tochi/${sl}/list/`],
+      ['Yahoo!不動産 中古マンション',`https://realestate.yahoo.co.jp/used/mansion/search/03/${pc}/`],['不動産ジャパン',`https://www.fudousan.or.jp/`]]},
+    {h:'投資用（収益物件）',l:[
+      ['楽待 収益物件',`https://www.rakumachi.jp/syuuekibukken/area/prefecture/dimAll/?pref=${+pc}`],['健美家 収益物件',`https://www.kenbiya.com/pp0/s/${sl}/`]]},
+    {h:'大手の仲介会社',l:[
+      ['三井のリハウス','https://www.rehouse.co.jp/'],['東急リバブル','https://www.livable.co.jp/'],['住友不動産販売','https://www.stepon.co.jp/'],['ノムコム（野村の仲介）','https://www.nomu.com/']]},
+    {h:'相場・成約価格を調べる',l:[
+      ['不動産情報ライブラリ（国交省）','https://www.reinfolib.mlit.go.jp/'],['レインズ（成約価格の公開）','https://www.reins.or.jp/'],['全国地価マップ','https://www.chikamap.jp/']]},
+    {h:'地図・災害',l:[
+      ['重ねるハザードマップ','https://disaportal.gsi.go.jp/'],['地理院地図','https://maps.gsi.go.jp/'],['Googleマップ','https://www.google.com/maps/']]},
+  ];
+}
+function linkGroupHtml(g){return `<h3>${esc(g.h)}</h3><div class="links">${g.l.map(([n,u])=>`<a class="btn sub sm" target="_blank" rel="noopener" href="${esc(u)}">${esc(n)} ↗</a>`).join('')}</div>`}
+function renderLinks(m){
+  const pc=LS.get('linkPref','13');
+  m.innerHTML=`<div class="card"><h2>外部リンク</h2>
+  <div class="note">物件サイトや調べもの用のサイトに、すぐ移動できます。都県を選ぶと、その地域の一覧が開きます。</div>
+  <label class="f">都県</label>
+  <div class="chips">${PREFS.map(([c,n])=>`<button class="chip ${pc===c?'on':''}" onclick="LS.set('linkPref','${c}');renderLinks($('#main'))">${n}</button>`).join('')}</div>
+  ${linkGroups(pc,'').map(linkGroupHtml).join('')}
+  <div class="note" style="margin-top:10px">気になる物件を見つけたら、住所と価格を「物件を評価」に入れると、災害・将来性・相場との比較が出ます。</div></div>`;
+}
