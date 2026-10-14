@@ -76,19 +76,26 @@ def locate_districts(rows):
     need = sorted({(r['code'], r['pref'] + r['muni'] + r['dist']) for r in rows if r['code']} - {(k.split('|')[0], k.split('|')[1]) for k in geo})
     print('地区の位置を新しく調べる数', len(need), flush=True)
     t0 = time.time()
-    for i, (code, q) in enumerate(need):
+
+    def one(item):
+        code, q = item
         if time.time() - t0 > 90 * 60:  # 1回の実行で長くかかりすぎないよう、残りは次回に回す
-            print('時間切れ。残り', len(need) - i, '件は次回', flush=True)
-            break
-        g = None
+            return item, 'skip'
         try:
             g = geocode(q)
         except Exception:
-            pass
-        geo[code + '|' + q] = g
-        time.sleep(0.25)
-        if i % 500 == 499:
-            save('district_geo.json', geo); print(' …', i + 1, flush=True)
+            return item, 'skip'
+        time.sleep(0.2)
+        return item, g
+
+    done = 0
+    with ThreadPoolExecutor(4) as ex:
+        for (code, q), g in ex.map(one, need):
+            if g == 'skip':
+                continue
+            geo[code + '|' + q] = g; done += 1
+            if done % 1000 == 0:
+                save('district_geo.json', geo); print(' …', done, flush=True)
     save('district_geo.json', geo)
     return geo
 

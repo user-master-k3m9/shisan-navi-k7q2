@@ -1,12 +1,12 @@
 # 不動産情報ライブラリの画面からダウンロードしたCSV（zipのままでもよい）を読み込む
 # 置き場所：~/fudosan-src/txcsv/ （ダウンロードフォルダから自動でここへ移す）
-import os, io, re, csv, glob, zipfile
+import os, io, re, csv, glob, zipfile, unicodedata
 from reinfo import TYPES, num, year_built, period
 
 DIR = os.path.expanduser('~/fudosan-src/txcsv')
 COLS = {  # CSVの見出し（の一部）→ 内部の名前
     'type': '種類', 'cat': '価格情報区分', 'code': '市区町村コード', 'pref': '都道府県名', 'muni': '市区町村名', 'dist': '地区名',
-    'stn': '最寄駅：名称', 'stm': '最寄駅：距離', 'price': '取引価格（総額）', 'plan': '間取り', 'area': '面積（㎡）', 'unit': '取引価格（㎡単価）',
+    'stn': '最寄駅:名称', 'stm': '最寄駅:距離', 'price': '取引価格（総額）', 'plan': '間取り', 'area': '面積（㎡）', 'unit': '取引価格（㎡単価）',
     'shape': '土地の形状', 'tfa': '延床面積', 'by': '建築年', 'st': '建物の構造', 'road': '幅員', 'bcr': '建ぺい率', 'far': '容積率',
     'per': '取引時期', 'ren': '改装', 'rem': '取引の事情',
 }
@@ -20,14 +20,14 @@ def _rows_from_text(text):
     idx = {}
     for k, label in COLS.items():
         for i, h in enumerate(head):
-            if label in h and k not in idx:
+            if unicodedata.normalize('NFKC', label) in unicodedata.normalize('NFKC', h) and k not in idx:
                 idx[k] = i
     if 'type' not in idx or 'price' not in idx:
         return []
     out = []
     for r in rd:
-        g = lambda k: r[idx[k]].strip() if k in idx and idx[k] < len(r) else ''
-        t = TYPES.get(g('type').replace('（', '(').replace('）', ')'))
+        g = lambda k: unicodedata.normalize('NFKC', r[idx[k]]).strip() if k in idx and idx[k] < len(r) else ''
+        t = TYPES.get(g('type'))
         price = num(g('price'))
         if not t or not price:
             continue

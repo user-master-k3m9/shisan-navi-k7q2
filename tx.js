@@ -7,6 +7,7 @@ const TX={
   mode:'tx',files:{},res:null,news:null,PI:{},
   init(){
     TX.mode=LS.get('mode',Object.keys(D.txindex||{}).length?'tx':'point');
+    idbGet('txidx').then(v=>{TX.localIdx=v||{};if(Object.keys(TX.localIdx).length&&TX.mode==='tx'&&S.tab==='search'&&S.detail==null)render()}).catch(()=>{});
     for(const p of P)TX.PI[p.i]=p;
     fetch('news.json').then(r=>r.ok?r.json():null).then(j=>{if(j){TX.news=j;if(S.tab==='info'||S.detail!=null)render()}}).catch(()=>{});
   }
@@ -15,15 +16,19 @@ function setMode(m){TX.mode=m;LS.set('mode',m);results=null;TX.res=null;render()
 function modeSwitch(){
   return `<div class="seg" style="display:flex;margin-bottom:10px"><button style="flex:1" class="${TX.mode==='tx'?'on':''}" onclick="setMode('tx')">売買事例（実際の価格）</button><button style="flex:1" class="${TX.mode!=='tx'?'on':''}" onclick="setMode('point')">地価地点（土地の値段）</button></div>`;
 }
-const qNow=()=>{let mx=0;for(const v of Object.values(D.txindex||{}))mx=Math.max(mx,v[1]);return mx};
+const qNow=()=>{let mx=0;for(const v of Object.values(allIdx()))mx=Math.max(mx,v[1]);return mx};
+function allIdx(){const o=Object.assign({},D.txindex||{});for(const [c,v] of Object.entries(TX.localIdx||{}))if(!o[c]||v[1]>o[c][1])o[c]=v;return o}
 const perTxt=p=>p?`${Math.floor(p/10)}年${['','1〜3月','4〜6月','7〜9月','10〜12月'][p%10]}`:'—';
 
 // ---------- 読み込みと相場モデル ----------
 async function loadTx(code){
   if(TX.files[code])return TX.files[code];
-  if(!(D.txindex||{})[code])return null;
-  const r=await fetch('tx/'+code+'.json');if(!r.ok)return null;
-  const j=await r.json();
+  const pub=(D.txindex||{})[code],loc=(TX.localIdx||{})[code];
+  if(!pub&&!loc)return null;
+  let j=null;
+  if(pub){const r=await fetch('tx/'+code+'.json');if(r.ok)j=await r.json()}
+  if(loc&&(!pub||loc[1]>pub[1]||!j)){j=await localFile(code,j)}
+  if(!j)return null;
   const ds=j.d.map(([n,la,lo,hz,lq,pi])=>({n,la,lo,hz:hz||{},lq,pi,sc:null}));
   const recs=j.r.map((a,k)=>{const o={code,k,t:a[0],closed:a[1],D:ds[a[2]],price:a[3],area:a[4],unit:a[5],plan:a[6]||'',tfa:a[7],by:a[8],st:a[9]||'',per:a[10],far:a[11],ren:a[12]||'',rem:a[13]||'',shape:a[14]||'',road:a[15],stn:a[16]||'',stm:a[17]};
     o.age=o.by&&o.per?Math.max(0,Math.floor(o.per/10)-o.by):null;return o});
@@ -63,9 +68,9 @@ function districtScore(d,code){
 
 // ---------- 検索 ----------
 function renderTxSearch(m){
-  const idx=D.txindex||{};
+  const idx=allIdx();
   if(!Object.keys(idx).length){
-    m.innerHTML=modeSwitch()+`<div class="card"><h2>売買事例をさがす</h2>
+    m.innerHTML=modeSwitch()+updateBox()+`<div class="card"><h2>売買事例をさがす</h2>
     <div class="warnbox">実際に売れたマンション・戸建て・土地の価格（国の不動産情報ライブラリ）は、まだ取り込まれていません。取り込まれると、ここで検索できるようになります。<br>それまでは「地価地点」と「物件を評価」を使ってください。</div></div>`;return;
   }
   const munis=Object.entries(D.muni).filter(([c])=>FT.prefs.includes(c.slice(0,2))&&idx[c]).sort((a,b)=>a[0].localeCompare(b[0]));
@@ -96,7 +101,7 @@ function renderTxSearch(m){
   <button class="btn" id="t_go" onclick="doTxSearch()">この条件で検索</button>
   <div id="t_msg" class="note" style="margin-top:6px"></div>
   <div style="height:8px"></div>
-  <button class="btn sub" onclick="FT=Object.assign({},TDEF);LS.set('txfilter',FT);renderTxSearch($('#main'))">条件をリセット</button></div>`;
+  <button class="btn sub" onclick="FT=Object.assign({},TDEF);LS.set('txfilter',FT);renderTxSearch($('#main'))">条件をリセット</button></div>`+updateBox();
   ['pmin','pmax','amin','amax','plan'].forEach(k=>$('#t_'+k).addEventListener('input',e=>{FT[k]=e.target.value}));
 }
 function togT(k){FT.types=FT.types.includes(k)?FT.types.filter(x=>x!==k):[...FT.types,k];if(!FT.types.length)FT.types=[k];renderTxSearch($('#main'))}
@@ -107,7 +112,7 @@ async function doTxSearch(){
   if(!FT.munis.length){msg.textContent='市区町村を1つ以上選んでください。';return}
   if(FT.munis.length>20){msg.textContent='市区町村は20までにしてください。';return}
   LS.set('txfilter',FT);$('#t_go').disabled=true;msg.textContent='売買事例を読み込んでいます…';
-  try{await Promise.all(FT.munis.map(loadTx))}catch(e){msg.textContent='読み込めませんでした。電波の良い所でもう一度試してください。';$('#t_go').disabled=false;return}
+  try{TX.prog=t=>{msg.textContent=t};for(const c of FT.munis)await loadTx(c);TX.prog=null}catch(e){msg.textContent='読み込めませんでした。電波の良い所でもう一度試してください。';$('#t_go').disabled=false;return}
   TX.res=null;shown=40;go('list');
 }
 function txFilt(){
@@ -260,4 +265,99 @@ function updatedCard(){
   <dt>売買事例</dt><dd>${mt.tx?esc(mt.tx)+(mt.txsrc==='CSV'?'取込':'取得')+'（'+perTxt(qNow())+'まで）':'まだ入っていません'}</dd>
   <dt>災害の想定</dt><dd>${esc(mt.hazard||'')}取得（3か月ごと）</dd>
   <dt>ニュース</dt><dd>${esc(mt.news||'')}</dd></dl></div>`;
+}
+
+// ---------- 最新の売買データを端末に取り込む ----------
+const RP_URL='https://www.reinfolib.mlit.go.jp/realEstatePrices/';
+function updateBox(){
+  const q=qNow(),li=TX.localIdx||{},n=Object.values(li).reduce((s,v)=>s+v[0],0);
+  return `<div class="card"><h2>売買データを最新にする</h2>
+  <div class="note">今のデータ：${q?perTxt(q)+'まで':'なし'}${n?`（この端末で取り込んだ ${n.toLocaleString()}件を含む）`:''}。国は3か月ごとに新しい期間を追加します。</div>
+  <ol class="note" style="font-size:13px;padding-left:18px;margin:8px 0">
+  <li>下のボタンで国のサイトを開く</li>
+  <li>「住所から」で都道府県を選び、市区町村は「市区町村」のまま。取引価格・成約価格の両方にチェック</li>
+  <li>種類は「中古マンション等」（土地・戸建ても見たいときは「宅地」でもう1回）、時期は一番新しい期間まで</li>
+  <li>「ダウンロード」を押す（zipファイルが保存されます）</li>
+  <li>このアプリに戻り「ダウンロードしたファイルを取り込む」でそのzipを選ぶ（複数選べます）</li></ol>
+  <div class="links"><a class="btn sm" href="${RP_URL}" target="_blank" rel="noopener">国のサイトを開く（ダウンロード）</a>
+  <label class="btn sm sub" style="cursor:pointer">ダウンロードしたファイルを取り込む<input type="file" accept=".zip,.csv,application/zip,text/csv" multiple style="display:none" onchange="importTx(this.files)"></label></div>
+  <div id="imp_msg" class="note" style="margin-top:6px"></div>
+  ${n?`<button class="chip" style="margin-top:8px" onclick="clearLocalTx()">この端末で取り込んだデータを消す</button>`:''}</div>`;
+}
+// IndexedDB（取り込んだデータは大きいので localStorage ではなくこちら）
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('shisan-navi',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbGet(k){const db=await idb();return new Promise((res,rej)=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
+async function idbSet(k,v){const db=await idb();return new Promise((res,rej)=>{const tr=db.transaction('kv','readwrite');tr.objectStore('kv').put(v,k);tr.oncomplete=()=>res();tr.onerror=()=>rej(tr.error)})}
+async function idbClear(){const db=await idb();return new Promise(res=>{const tr=db.transaction('kv','readwrite');tr.objectStore('kv').clear();tr.oncomplete=()=>res()})}
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+function parseCSV(text){
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;else if(c===','){row.push(f);f=''}else if(c==='\n'){row.push(f);rows.push(row);row=[];f=''}else if(c!=='\r')f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}return rows;
+}
+const TXT={'中古マンション等':'m','宅地(土地と建物)':'h','宅地(土地)':'l'};
+const nk=s=>String(s||'').normalize('NFKC').trim();
+const numv=s=>{const m=nk(s).replace(/,/g,'').match(/\d+(\.\d+)?/);return m?+m[0]:null};
+function decodeCSV(buf){let t=new TextDecoder('utf-8').decode(buf);if(!t.includes('種類'))t=new TextDecoder('shift_jis').decode(buf);return t.replace(/^﻿/,'')}
+async function importTx(files){
+  const msg=$('#imp_msg');if(!files||!files.length)return;
+  try{
+    msg.textContent='ファイルを読んでいます…';
+    const texts=[];
+    for(const f of files){
+      if(/\.zip$/i.test(f.name)||f.type.includes('zip')){
+        if(!window.JSZip)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+        const z=await JSZip.loadAsync(await f.arrayBuffer());
+        for(const n of Object.keys(z.files))if(/\.csv$/i.test(n))texts.push(decodeCSV(await z.files[n].async('uint8array')));
+      }else texts.push(decodeCSV(new Uint8Array(await f.arrayBuffer())));
+    }
+    const by={};let cnt=0;
+    for(const text of texts){
+      const rows=parseCSV(text),h=(rows.shift()||[]).map(nk),ix=l=>h.findIndex(x=>x.includes(nk(l)));
+      const I={type:ix('種類'),cat:ix('価格情報区分'),code:ix('市区町村コード'),pref:ix('都道府県名'),muni:ix('市区町村名'),dist:ix('地区名'),stn:ix('最寄駅:名称'),stm:ix('最寄駅:距離'),
+        price:ix('取引価格(総額)'),plan:ix('間取り'),area:ix('面積('),unit:ix('取引価格(㎡単価)'),shape:ix('土地の形状'),tfa:ix('延床面積'),by:ix('建築年'),st:ix('建物の構造'),
+        road:ix('幅員'),far:ix('容積率'),per:ix('取引時期'),ren:ix('改装'),rem:ix('取引の事情')};
+      if(I.type<0||I.price<0)continue;
+      const g=(r,k)=>I[k]>=0?nk(r[I[k]]):'';
+      for(const r of rows){
+        const t=TXT[g(r,'type')],price=numv(g(r,'price'));if(!t||!price)continue;
+        const code=g(r,'code').slice(0,5);if(!code)continue;
+        const pm=g(r,'per').match(/(\d{4})年第(\d)四半期/),per=pm?+pm[1]*10+ +pm[2]:null;
+        const bym=g(r,'by').match(/(\d{4})/),byv=g(r,'by').includes('戦前')?1945:bym?+bym[1]:null;
+        const area=numv(g(r,'area')),unitv=numv(g(r,'unit'))||(area?Math.round(price/area):null);
+        (by[code]=by[code]||{pref:g(r,'pref'),muni:g(r,'muni'),rows:[]}).rows.push([t,g(r,'cat').includes('成約')?1:0,g(r,'dist'),price,area,unitv,g(r,'plan'),numv(g(r,'tfa')),byv,g(r,'st'),per,numv(g(r,'far')),g(r,'ren'),g(r,'rem'),g(r,'shape'),numv(g(r,'road')),g(r,'stn'),g(r,'stm')?numv(g(r,'stm')):null]);
+        cnt++;
+      }
+    }
+    if(!cnt){msg.textContent='売買価格のデータが見つかりませんでした。国のサイトでダウンロードしたzipを選んでください。';return}
+    msg.textContent=`${cnt.toLocaleString()}件を保存しています…`;
+    const idx=Object.assign({},TX.localIdx||{});
+    for(const [code,v] of Object.entries(by)){
+      const old=await idbGet('tx:'+code),seen=new Set(),rows=[];
+      for(const r of (old?old.rows:[]).concat(v.rows)){const k=r.join('|');if(!seen.has(k)){seen.add(k);rows.push(r)}}
+      await idbSet('tx:'+code,{pref:v.pref,muni:v.muni,rows});
+      idx[code]=[rows.length,Math.max(...rows.map(r=>r[10]||0))];delete TX.files[code];
+    }
+    await idbSet('txidx',idx);TX.localIdx=idx;TX.res=null;
+    msg.textContent=`${cnt.toLocaleString()}件を取り込みました（${Object.keys(by).length}市区町村）。検索で使えます。`;
+    setTimeout(()=>renderTxSearch($('#main')),1500);
+  }catch(e){msg.textContent='取り込めませんでした：'+(e.message||e)}
+}
+async function clearLocalTx(){if(!confirm('この端末で取り込んだ売買データを消しますか？'))return;await idbClear();TX.localIdx={};TX.files={};TX.res=null;renderTxSearch($('#main'))}
+// 取り込んだデータを、公開データと同じ形にする（町丁の位置は公開データ→端末の記録→住所検索の順）
+async function localFile(code,pub){
+  const L=await idbGet('tx:'+code);if(!L)return pub;
+  const known={};if(pub)for(const d of pub.d)known[d[0]]=d;
+  const cache=(await idbGet('geo:'+code))||{};
+  const names=[...new Set(L.rows.map(r=>r[2]))],need=names.filter(n=>!known[n]&&!(n in cache));
+  let done=0;
+  const work=async n=>{try{const g=await geocode(L.pref+L.muni+n);const hz=await hazardAt(g.lat,g.lon);const np=nearest(g.lat,g.lon,1)[0];cache[n]=[n,g.lat,g.lon,hz,null,np?np[0].i:-1]}catch(e){cache[n]=[n,null,null,{},null,-1]}
+    done++;if(TX.prog)TX.prog(`${L.muni}の町丁の位置と災害の想定を調べています… ${done}/${need.length}`)};
+  for(let i=0;i<need.length;i+=4)await Promise.all(need.slice(i,i+4).map(work));
+  if(need.length)await idbSet('geo:'+code,cache);
+  const d=[],di={};
+  for(const n of names){di[n]=d.length;d.push(known[n]||cache[n]||[n,null,null,{},null,-1])}
+  return {d,r:L.rows.map(r=>{const a=r.slice();a[2]=di[r[2]];return a})};
 }

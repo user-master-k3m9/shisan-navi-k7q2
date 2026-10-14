@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v3';
+const VER='v4';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -228,7 +228,7 @@ function lineChart(vals,labels,fmt){
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" width="100%"><line x1="${pl}" x2="${w-pr}" y1="${h-pb}" y2="${h-pb}" stroke="var(--line)"/>
   <text x="${pl-4}" y="${Y(mx)+4}" text-anchor="end">${fmt(mx)}</text><text x="${pl-4}" y="${Y(mn)}" text-anchor="end">${fmt(mn)}</text>
   <path d="${d}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${xs.map(([i,v])=>`<circle cx="${X(i)}" cy="${Y(v)}" r="2.5" fill="var(--acc)"/>`).join('')}
-  ${labels.map((l,i)=>l?`<text x="${X(i)}" y="${h-6}" text-anchor="middle">${l}</text>`:'').join('')}</svg>`;
+  ${labels.map((l,i)=>l?`<text x="${X(i)}" y="${h-6}" text-anchor="${i===0?'start':i===labels.length-1?'end':'middle'}">${l}</text>`:'').join('')}</svg>`;
 }
 function hazardTable(hz,lq){
   return `<table class="t">${Object.entries(HZN).map(([k,n])=>{const v=hz[k];let t='想定区域外',c='good';
