@@ -279,6 +279,9 @@ function updateBox(){
   const q=qNow(),li=TX.localIdx||{},n=Object.values(li).reduce((s,v)=>s+v[0],0);
   return `<div class="card"><h2>売買データを最新にする</h2>
   <div class="note">今のデータ：${q?perTxt(q)+'まで':'なし'}${n?`（この端末で取り込んだ ${n.toLocaleString()}件を含む）`:''}。国は3か月ごとに新しい期間を追加します。</div>
+  <button class="btn" id="auto_btn" style="margin-top:10px" onclick="autoUpdate()">最新の売買データをダウンロード（自動）</button>
+  <div id="auto_msg" class="note" style="margin-top:6px">押すと、Macが国のサイトからダウンロード・解凍・取り込み・公開まで行い、終わるとこのアプリが自動で最新になります（数分）。</div>
+  <details style="margin-top:10px"><summary class="note">Macが使えないとき（手動で取り込む）</summary>
   <ol class="note" style="font-size:13px;padding-left:18px;margin:8px 0">
   <li>下のボタンで国のサイトを開く</li>
   <li>「住所から」で都道府県を選び、市区町村は「市区町村」のまま。取引価格・成約価格の両方にチェック</li>
@@ -288,7 +291,7 @@ function updateBox(){
   <div class="links"><a class="btn sm" href="${RP_URL}" target="_blank" rel="noopener">国のサイトを開く（ダウンロード）</a>
   <label class="btn sm sub" style="cursor:pointer">ダウンロードしたファイルを取り込む<input type="file" accept=".zip,.csv,application/zip,text/csv" multiple style="display:none" onchange="importTx(this.files)"></label></div>
   <div id="imp_msg" class="note" style="margin-top:6px"></div>
-  ${n?`<button class="chip" style="margin-top:8px" onclick="clearLocalTx()">この端末で取り込んだデータを消す</button>`:''}</div>`;
+  ${n?`<button class="chip" style="margin-top:8px" onclick="clearLocalTx()">この端末で取り込んだデータを消す</button>`:''}</details></div>`;
 }
 // IndexedDB（取り込んだデータは大きいので localStorage ではなくこちら）
 function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('shisan-navi',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
@@ -366,4 +369,22 @@ async function localFile(code,pub){
   const d=[],di={};
   for(const n of names){di[n]=d.length;d.push(known[n]||cache[n]||[n,null,null,{},null,-1])}
   return {d,r:L.rows.map(r=>{const a=r.slice();a[2]=di[r[2]];return a})};
+}
+
+// ---------- ボタン1つで最新に（Macが国のサイトから取ってきて公開する） ----------
+const NTFY='https://ntfy.sh/',TOPIC='shisan-navi-ab2dc4cb2fe42622297ccb68';
+function autoUpdate(){
+  const btn=$('#auto_btn'),msg=$('#auto_msg');btn.disabled=true;
+  const show=t=>{msg.textContent=t};
+  let started=false,es=null;
+  try{es=new EventSource(NTFY+TOPIC+'-status/sse')}catch(e){}
+  const end=()=>{try{es&&es.close()}catch(e){};btn.disabled=false};
+  if(es)es.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
+    const [k,txt]=String(m.message||'').split('|');if(!txt)return;
+    started=true;show(txt);
+    if(k==='done'){end();show(txt+' 読み込み直します…');setTimeout(()=>location.reload(),1500)}
+    if(k==='error'||k==='recent')end();};
+  // 受け手の準備ができてから合図を送る
+  setTimeout(()=>{fetch(NTFY+TOPIC,{method:'POST',body:'update'}).then(()=>show('Macに合図を送りました。返事を待っています…')).catch(()=>{show('合図を送れませんでした。電波の良い所でもう一度押してください。');end()})},1200);
+  setTimeout(()=>{if(!started){show('Macから返事がありません。Macの電源が切れているか、スリープ中です。Macを開いてからもう一度押すか、下の「Macが使えないとき」から手動で取り込んでください。');end()}},45000);
 }

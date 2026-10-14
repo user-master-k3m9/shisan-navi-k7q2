@@ -1,5 +1,5 @@
 // network-first（数秒で返事がなければキャッシュ）
-const CACHE='shisan-nav-v5';
+const CACHE='shisan-nav-v6';
 const CORE=['./','index.html','app.js','tx.js','data.json','manifest.webmanifest','icon-192.png','apple-touch-icon.png',
  'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css','https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)))});
