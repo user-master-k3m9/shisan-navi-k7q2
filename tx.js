@@ -29,7 +29,7 @@ async function loadTx(code){
   if(pub){const r=await fetch('tx/'+code+'.json');if(r.ok)j=await r.json()}
   if(loc&&(!pub||loc[1]>pub[1]||!j)){j=await localFile(code,j)}
   if(!j)return null;
-  const ds=j.d.map(([n,la,lo,hz,lq,pi])=>({n,la,lo,hz:hz||{},lq,pi,sc:null}));
+  const ds=j.d.map(([n,la,lo,hz,lq,pi,qk,fr])=>({n,la,lo,hz:hz||{},lq,pi,qk,fr,sc:null}));
   const recs=j.r.map((a,k)=>{const o={code,k,t:a[0],closed:a[1],D:ds[a[2]],price:a[3],area:a[4],unit:a[5],plan:a[6]||'',tfa:a[7],by:a[8],st:a[9]||'',per:a[10],far:a[11],ren:a[12]||'',rem:a[13]||'',shape:a[14]||'',road:a[15],stn:a[16]||'',stm:a[17]};
     o.age=o.by&&o.per?Math.max(0,Math.floor(o.per/10)-o.by):null;return o});
   // 町丁ごとに、国のデータに書かれた最寄り駅（一番多いもの）と徒歩分数（中央値）をまとめる
@@ -68,7 +68,7 @@ function districtScore(d,code){
   if(!st)for(const s of D.stations){const x=distM(d.la,d.lo,s.lat,s.lon);if(x<sd){sd=x;st=s}}
   if(d.stm!=null){sd=d.stm*80/1.25}
   const pj=D.projects.map(q=>({q,d:distM(d.la,d.lo,q.lat,q.lon)})).filter(x=>x.d<3000).sort((a,b)=>a.d-b.d).slice(0,6);
-  const f={hz:d.hz,lq:d.lq,g5:p?p.g5:null,h:p?p.h:null,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:Math.round(sd*1.25),pj};
+  const f={hz:d.hz,lq:d.lq,qk:d.qk,fr:d.fr,tokyo:String(code).startsWith('13'),g5:p?p.g5:null,h:p?p.h:null,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:Math.round(sd*1.25),pj};
   d.sc={f,r:score(f),st,sd};return d.sc;
 }
 
@@ -102,7 +102,7 @@ function renderTxSearch(m){
   <label class="f">場所の総合評価</label>
   <div class="chips">${[['','指定なし'],['S','Sのみ'],['A','A以上'],['B','B以上'],['C','C以上']].map(([k,n])=>`<button class="chip ${FT.grade===k?'on':''}" onclick="FT.grade='${k}';renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">こだわり条件</label>
-  ${[['cheap','相場より割安（相場の90%未満）'],['closedOnly','成約価格のみ（不動産会社経由で成約した価格）'],['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${FT[k]?'checked':''} onchange="FT.${k}=this.checked">${n}</label>`).join('')}
+  ${[['cheap','相場より割安（相場の90%未満）'],['closedOnly','成約価格のみ（不動産会社経由で成約した価格）'],['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['noLiq','液状化しやすい地形を除く'],['noFire','火災危険度3以上を除く（東京都）']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${FT[k]?'checked':''} onchange="FT.${k}=this.checked">${n}</label>`).join('')}
   <div style="height:12px"></div>
   <button class="btn" id="t_go" onclick="doTxSearch()">この条件で検索</button>
   <div id="t_msg" class="note" style="margin-top:6px"></div>
@@ -140,6 +140,8 @@ function txFilt(){
       if(FT.grade&&(!sc||GR[sc.r.grade]<GR[FT.grade]))continue;
       if(FT.noFlood&&(o.D.hz.flood||o.D.hz.surge||o.D.hz.tsunami))continue;
       if(FT.noSlide&&(o.D.hz.debris||o.D.hz.slope||o.D.hz.slide))continue;
+      if(FT.noLiq&&o.D.qk&&liqLand(o.D.qk[3]))continue;
+      if(FT.noFire&&o.D.fr&&o.D.fr[1]>=3)continue;
       out.push(o);
     }}
   return out;
@@ -150,16 +152,19 @@ function getTx(){if(!TX.res)TX.res=txFilt().sort(TSORT[tsort][1]);return TX.res}
 
 // ---------- 一覧・詳細 ----------
 function txTitle(o){return [TYPE_S[o.t],o.plan,o.area?o.area+'㎡':'',o.age!=null?(o.age?'築'+o.age+'年':'新築'):''].filter(Boolean).join('・')}
+// 建物の地震・火災への強さ（旧耐震＝1981年以前の建築、木造）
+function bldTags(o){const a=[];if(o.t!=='l'&&o.by&&o.by<=1981)a.push(['旧耐震（'+o.by+'年築）','bad']);
+  if(o.t!=='l'&&/木造/.test(o.st||'')&&o.D.fr&&o.D.fr[1]>=3)a.push(['木造×火災危険度'+o.D.fr[1],'bad']);return a}
 function txItemHtml(o){
   const sc=districtScore(o.D,o.code),g=sc?sc.r.grade:'D',m=D.muni[o.code],rt=ratioTag(o.ratio);
-  const hz=sc?sc.r.tags.filter(t=>/浸水|土砂|液状化/.test(t[0])):[];
+  const hz=sc?sc.r.tags.filter(t=>/浸水|土砂|液状化|火災|倒壊/.test(t[0])):[];
   return `<div class="item" onclick="showTx('${o.code}',${o.k})">
     <div class="grade g${sc?g:'D'}"><b>${sc?g:'－'}</b><small>${sc?sc.r.total+'点':'位置不明'}</small></div>
     <div style="flex:1;min-width:0">
       <div class="t">${esc(txTitle(o))}</div>
       <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
-      <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${o.stm!=null&&o.stm<=7?`<span class="tag good">駅徒歩${o.stm}分</span>`:''}</div>
+      <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${bldTags(o).map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${o.stm!=null&&o.stm<=7?`<span class="tag good">駅徒歩${o.stm}分</span>`:''}</div>
     </div></div>`;
 }
 function renderTxList(m){
@@ -205,11 +210,12 @@ function renderTxDetail(m){
   <div class="card"><h2>物件の情報</h2><dl class="kv">
     <dt>種類</dt><dd>${TYPE_N[o.t]}</dd>${o.stn?`<dt>最寄り駅</dt><dd>${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}</dd>`:''}<dt>面積</dt><dd>${o.area??'—'}㎡${o.tfa?`（延床 ${o.tfa}㎡）`:''}</dd>
     ${o.plan?`<dt>間取り</dt><dd>${esc(o.plan)}</dd>`:''}<dt>建築年</dt><dd>${o.by?o.by+'年':'—'}</dd>
-    ${o.st?`<dt>構造</dt><dd>${esc(o.st)}</dd>`:''}${o.far?`<dt>容積率</dt><dd>${o.far}%</dd>`:''}${o.road?`<dt>前面道路</dt><dd>幅${o.road}m</dd>`:''}
+    ${o.st?`<dt>構造</dt><dd>${esc(o.st)}${/木造/.test(o.st)?'（燃えやすい構造）':/ＲＣ|RC|ＳＲＣ|SRC/.test(o.st)?'（鉄筋コンクリート：燃えにくい）':''}</dd>`:''}
+    ${o.t!=='l'&&o.by?`<dt>耐震基準</dt><dd>${o.by<=1981?'<span class="tag bad">旧耐震の可能性（1981年以前の建築）</span>':'新耐震（1982年以降の建築）'}</dd>`:''}${o.far?`<dt>容積率</dt><dd>${o.far}%</dd>`:''}${o.road?`<dt>前面道路</dt><dd>幅${o.road}m</dd>`:''}
     ${o.shape?`<dt>土地の形</dt><dd>${esc(o.shape)}</dd>`:''}${o.ren?`<dt>改装</dt><dd>${esc(o.ren)}</dd>`:''}${o.rem?`<dt>事情</dt><dd>${esc(o.rem)}</dd>`:''}
     <dt>出典</dt><dd>国土交通省 不動産情報ライブラリ（${o.closed?'成約価格':'取引価格'}）</dd></dl></div>
   ${sc?`<div class="card"><h2>場所の評価の内訳（${esc(o.D.n)}の中心付近）</h2>${scoreHtml(sc.r)}<div class="note">住所は町丁までしか公表されていないため、町丁の中心付近で判定しています。駅までは、国のデータにある最寄り駅と徒歩分数（その町丁の中央値）を使っています。</div></div>
-  <div class="card"><h2>災害リスク（町丁の中心付近）</h2>${hazardTable(o.D.hz,o.D.lq)}</div>
+  <div class="card"><h2>災害リスク（町丁の中心付近）</h2>${hazardTable(o.D.hz,o.D.lq,o.D.qk,o.D.fr,String(code).startsWith('13'))}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(sc.f.pj)}</div>`:''}
   <div class="card"><h2>将来の人口</h2>${popHtml(mu)}</div>
   ${newsCard([code])}
@@ -362,7 +368,7 @@ async function localFile(code,pub){
   const cache=(await idbGet('geo:'+code))||{};
   const names=[...new Set(L.rows.map(r=>r[2]))],need=names.filter(n=>!known[n]&&!(n in cache));
   let done=0;
-  const work=async n=>{try{const g=await geocode(L.pref+L.muni+n);const hz=await hazardAt(g.lat,g.lon);const np=nearest(g.lat,g.lon,1)[0];cache[n]=[n,g.lat,g.lon,hz,null,np?np[0].i:-1]}catch(e){cache[n]=[n,null,null,{},null,-1]}
+  const work=async n=>{try{const g=await geocode(L.pref+L.muni+n);const [hz,qk]=await Promise.all([hazardAt(g.lat,g.lon),quakeAt(g.lat,g.lon)]);const np=nearest(g.lat,g.lon,1)[0];cache[n]=[n,g.lat,g.lon,hz,null,np?np[0].i:-1,qk,String(code).startsWith('13')?fireAt(g.lat,g.lon):null]}catch(e){cache[n]=[n,null,null,{},null,-1]}
     done++;if(TX.prog)TX.prog(`${L.muni}の町丁の位置と災害の想定を調べています… ${done}/${need.length}`)};
   for(let i=0;i<need.length;i+=4)await Promise.all(need.slice(i,i+4).map(work));
   if(need.length)await idbSet('geo:'+code,cache);

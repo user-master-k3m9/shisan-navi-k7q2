@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v8';
+const VER='v9';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -16,6 +16,8 @@ const walkMin=m=>Math.max(1,Math.ceil(m/80));
 
 // ---------- 評価のしくみ ----------
 const DEPTH={0.3:'0.3m未満',0.5:'0.3〜0.5m',1:'0.5〜1m',3:'1〜3m',5:'3〜5m',10:'5〜10m',20:'10〜20m',30:'20m以上'};
+// 微地形区分（J-SHIS）から液状化のしやすさの目安：2=しやすい、1=ややしやすい
+function liqLand(g){g=String(g||'');if(/埋立|干拓|旧河道|河原|砂丘間/.test(g))return 2;if(/後背湿地|三角州|海岸低地|砂州|砂礫州|自然堤防|谷底低地|湿地/.test(g))return 1;return 0}
 function liqCut(lq){const t=String(lq[1]||'');if(/しにくい|対象外|なし/.test(t))return 0;if(/非常に|極めて|きわめて|特に/.test(t))return 8;if(/やや/.test(t))return 3;if(/しやすい/.test(t))return 6;return 0}
 const HZN={flood:'洪水（想定最大）',surge:'高潮',tsunami:'津波',debris:'土石流',slope:'がけ崩れ（急傾斜地）',slide:'地すべり'};
 // 洪水タイルは6段階の凡例（0.5m未満／0.5〜3m／3〜5m…）、高潮・津波は8段階
@@ -35,13 +37,32 @@ function score(f){
     w.sort((a,b)=>b-a);cut+=(w[0]||0)+(w.slice(1).reduce((a,b)=>a+b,0))*0.4;
     const ls=Math.max(hz.debris||0,hz.slope||0,hz.slide||0);
     if(ls){cut+=ls===2?20:10;n.push(ls===2?'土砂災害特別警戒区域（レッドゾーン）':'土砂災害警戒区域（イエローゾーン）')}
-    if(f.lq){const lc=liqCut(f.lq);if(lc){cut+=lc;n.push('液状化：'+f.lq[1]);tags.push(['液状化'+(lc>=6?'しやすい':'ややしやすい'),lc>=6?'bad':'warn'])}}
     const v=clamp(25-cut,0,25);
     if(!n.length)n.push('洪水・高潮・津波・土砂災害の想定区域に入っていない');
-    if(f.lq&&!liqCut(f.lq))n.push('液状化：'+f.lq[1]);
-    parts.push({k:'安全性',max:25,v,n});
+    parts.push({k:'水害・土砂',max:25,v,n});
     if(hz.flood||hz.surge||hz.tsunami){const [k,d]=[['flood',hz.flood||0],['surge',hz.surge||0],['tsunami',hz.tsunami||0]].sort((a,b)=>waterCut(b[1],b[0])-waterCut(a[1],a[0]))[0];tags.push([`浸水${dl(k,d)}`,waterCut(d,k)>=9?'bad':'warn'])}else tags.push(['浸水想定なし','good']);
     if(ls)tags.push([ls===2?'土砂レッド':'土砂イエロー','bad']);
+  }
+  // 1b 地震・火災 15
+  {let n=[],cut=0;const q=f.qk,fr=f.fr;
+    if(q){const [p6l,p6u,arv,geo]=q;
+      cut+=clamp((p6u-0.03)/0.30,0,1)*4;
+      n.push(`30年以内に震度6強以上の揺れ：${(p6u*100).toFixed(1)}%（6弱以上 ${(p6l*100).toFixed(0)}%）`);
+      if(p6u>=0.2)tags.push([`震度6強 ${Math.round(p6u*100)}%`,'warn']);
+      if(arv){cut+=clamp((arv-1.2)/0.9,0,1)*2;n.push(`地盤の揺れやすさ：${arv.toFixed(2)}倍${arv>=1.6?'（揺れやすい）':''}`)}
+      const lv=liqLand(geo);
+      if(lv){cut+=lv===2?4:2;n.push(`地形：${geo}（${lv===2?'液状化しやすい':'液状化ややしやすい'}）`);tags.push([lv===2?'液状化しやすい地形':'液状化ややしやすい',lv===2?'bad':'warn'])}
+      else if(geo)n.push(`地形：${geo}`);
+    }else{cut+=3;n.push('地震の揺れのデータなし（平均的な減点）')}
+    if(f.lq){const lc=liqCut(f.lq);n.push('液状化（国の傾向図）：'+f.lq[1]);if(lc&&!(q&&liqLand(q[3])))cut+=lc>=6?4:2}
+    if(fr){const [b,fi,t]=fr;cut+=(fi-1)*1.5+(b-1)*0.5;
+      n.push(`東京都の地域危険度：火災 ランク${fi}・建物倒壊 ランク${b}・総合 ランク${t}（5段階で5が最も危険）`);
+      if(fi>=4)tags.push([`火災危険度${fi}`,'bad']);else if(fi>=3)tags.push([`火災危険度${fi}`,'warn']);
+      if(b>=4)tags.push([`倒壊危険度${b}`,'bad']);}
+    else if(f.tokyo)n.push('東京都の地域危険度：この場所は調査の対象外（市街化区域外など）');
+    else n.push('火災・建物倒壊の危険度：東京都以外は町丁目ごとの公表データがないため、評価に入っていません');
+    const v=clamp(15-cut,0,15);
+    parts.push({k:'地震・火災',max:15,v,n});
   }
   // 2 将来性 25
   {let n=[],v=0;
@@ -82,6 +103,9 @@ function score(f){
     else{v+=5;n.push('10年分の推移データなし')}
     parts.push({k:'値動きの安定',max:10,v,n});
   }
+  // 配点：水害・土砂20／地震・火災15／将来性22／人口18／利便性17／値動き8
+  const W={'水害・土砂':20,'地震・火災':15,'将来性':22,'人口':18,'利便性':17,'値動きの安定':8};
+  for(const p of parts){const w=W[p.k];p.v=p.v/p.max*w;p.max=w}
   const total=Math.round(parts.reduce((a,p)=>a+p.v,0));
   return {total,grade:grade(total),parts,tags};
 }
@@ -91,7 +115,7 @@ function prep(){
   P=D.points.map(p=>{
     const st=p.si>=0?D.stations[p.si]:null,m=D.muni[p.c];
     const h=p.h,g5=h[5]>0&&h[10]>0?cagr(h[5],h[10],5):null;
-    const f={hz:p.hz,lq:p.lq,g5,h,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:p.sd,pj:p.pj.map(([j,d])=>({q:D.projects[j],d}))};
+    const f={hz:p.hz,lq:p.lq,qk:p.qk,fr:p.fr,tokyo:p.c.startsWith('13'),g5,h,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:p.sd,pj:p.pj.map(([j,d])=>({q:D.projects[j],d}))};
     const r=score(f);
     const z=p.z||'';const cat=/商業|近商/.test(z)||(!/住宅/.test(p.u))?'商業地':'住宅地';
     return Object.assign(p,{f,r,st,m,g5,cat,pref:p.c.slice(0,2),txt:(p.a+' '+p.sn+' '+(m?m[1]:'')).toLowerCase()});
@@ -130,7 +154,7 @@ function renderSearch(m){
     <label class="f">総合評価</label>
     <div class="chips">${[['','指定なし'],['S','Sのみ'],['A','A以上'],['B','B以上'],['C','C以上']].map(([k,n])=>`<button class="chip ${F.grade===k?'on':''}" onclick="F.grade='${k}';renderSearch($('#main'))">${n}</button>`).join('')}</div>
     <label class="f">こだわり条件</label>
-    ${[['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['proj','新駅・延伸・再開発まで1.5km以内'],['up','地価が5年で10%以上上昇'],['popUp','2035年の人口が2020年以上（増加予測）']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${F[k]?'checked':''} onchange="F.${k}=this.checked">${n}</label>`).join('')}
+    ${[['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['noLiq','液状化しやすい地形を除く'],['noFire','火災危険度3以上を除く（東京都）'],['proj','新駅・延伸・再開発まで1.5km以内'],['up','地価が5年で10%以上上昇'],['popUp','2035年の人口が2020年以上（増加予測）']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${F[k]?'checked':''} onchange="F.${k}=this.checked">${n}</label>`).join('')}
     <div style="height:12px"></div>
     <button class="btn" onclick="doSearch()">この条件で検索（<span id="cnt">${count()}</span>件）</button>
     <div style="height:8px"></div>
@@ -154,6 +178,8 @@ function filt(){
     if(F.grade&&GR[p.r.grade]<GR[F.grade]-(F.grade==='S'?0:0))return false;
     if(F.noFlood&&(p.hz.flood||p.hz.surge||p.hz.tsunami))return false;
     if(F.noSlide&&(p.hz.debris||p.hz.slope||p.hz.slide))return false;
+    if(F.noLiq&&p.qk&&liqLand(p.qk[3]))return false;
+    if(F.noFire&&p.fr&&p.fr[1]>=3)return false;
     if(F.proj&&!p.f.pj.some(x=>x.d<1500))return false;
     if(F.up&&!(p.g5!=null&&Math.pow(1+p.g5,5)>=1.1))return false;
     if(F.popUp&&!(p.m&&p.m[2][3]>=p.m[2][0]))return false;
@@ -230,12 +256,19 @@ function lineChart(vals,labels,fmt){
   <path d="${d}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${xs.map(([i,v])=>`<circle cx="${X(i)}" cy="${Y(v)}" r="2.5" fill="var(--acc)"/>`).join('')}
   ${labels.map((l,i)=>l?`<text x="${X(i)}" y="${h-6}" text-anchor="${i===0?'start':i===labels.length-1?'end':'middle'}">${l}</text>`:'').join('')}</svg>`;
 }
-function hazardTable(hz,lq){
+function hazardTable(hz,lq,qk,fr,tokyo){
   return `<table class="t">${Object.entries(HZN).map(([k,n])=>{const v=hz[k];let t='想定区域外',c='good';
     if(v){if(['debris','slope','slide'].includes(k)){t=v===2?'特別警戒区域（レッド）':'警戒区域（イエロー）';c='bad'}else{t=dl(k,v)+'の浸水';c=waterCut(v,k)>=9?'bad':'warn'}}
     return `<tr><td>${n}</td><td><span class="tag ${c}">${t}</span></td></tr>`}).join('')}</table>
+    <table class="t">${qk?`<tr><td>震度6強以上（30年）</td><td><span class="tag ${qk[1]>=0.2?'warn':'good'}">${(qk[1]*100).toFixed(1)}%</span></td></tr>
+      <tr><td>震度6弱以上（30年）</td><td><span class="tag ${qk[0]>=0.5?'warn':'good'}">${(qk[0]*100).toFixed(0)}%</span></td></tr>
+      <tr><td>地盤の揺れやすさ</td><td><span class="tag ${qk[2]>=1.6?'warn':'good'}">${qk[2]?qk[2].toFixed(2)+'倍':'—'}</span></td></tr>
+      <tr><td>地形（液状化の目安）</td><td><span class="tag ${liqLand(qk[3])===2?'bad':liqLand(qk[3])?'warn':'good'}">${esc(qk[3]||'—')}${liqLand(qk[3])===2?'・しやすい':liqLand(qk[3])?'・ややしやすい':''}</span></td></tr>`:''}
+      ${fr?`<tr><td>火災危険度（東京都）</td><td><span class="tag ${fr[1]>=4?'bad':fr[1]>=3?'warn':'good'}">ランク${fr[1]}／5</span></td></tr>
+      <tr><td>建物倒壊危険度（東京都）</td><td><span class="tag ${fr[0]>=4?'bad':fr[0]>=3?'warn':'good'}">ランク${fr[0]}／5</span></td></tr>
+      <tr><td>総合危険度（東京都）</td><td><span class="tag ${fr[2]>=4?'bad':fr[2]>=3?'warn':'good'}">ランク${fr[2]}／5</span>${fr[4]?`<br><span class="note">${esc(fr[4])}</span>`:''}</td></tr>`:`<tr><td>火災・建物倒壊</td><td><span class="note">${tokyo?'東京都の調査の対象外の場所':'東京都以外は公表データなし'}</span></td></tr>`}</table>
     ${lq?`<table class="t"><tr><td>液状化</td><td><span class="tag ${liqCut(lq)>=6?'bad':liqCut(lq)?'warn':'good'}">${esc(lq[1]||'')}</span></td></tr></table>`:''}
-    <div class="note">${lq?'':'液状化・'}内水氾濫（下水があふれる浸水）は含みません。リンク先の重ねるハザードマップで確認してください。</div>`;
+    <div class="note">地震：J-SHIS（30年以内の確率・地盤）。火災・倒壊：東京都の地域危険度（ランク5が最も危険）。内水氾濫（下水があふれる浸水）は含みません。リンク先の重ねるハザードマップで確認してください。</div>`;
 }
 function popHtml(m){
   if(!m)return'<div class="note">データなし</div>';
@@ -281,7 +314,7 @@ function renderDetail(m){
   </div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(p.r)}</div>
   <div class="card"><h2>地価の推移（1㎡あたり）</h2>${lineChart(h,h.map((_,i)=>i%2===0?String(yr-10+i).slice(2)+'年':''),v=>(v/1e4).toFixed(v>=1e5?0:1)+'万')}</div>
-  <div class="card"><h2>災害リスク</h2>${hazardTable(p.hz,p.lq)}</div>
+  <div class="card"><h2>災害リスク（水害・土砂・地震・火災）</h2>${hazardTable(p.hz,p.lq,p.qk,p.fr,p.c.startsWith('13'))}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(p.f.pj)}</div>
   <div class="card"><h2>将来の人口</h2>${popHtml(p.m)}</div>
   ${newsCard([p.c])}
@@ -343,7 +376,7 @@ async function doEval(){
   $('#e_go').disabled=true;msg.textContent='住所の位置と、災害の想定を調べています…';
   try{
     const g=await geocode(e.addr);
-    const [hz,mc]=await Promise.all([hazardAt(g.lat,g.lon),muniCode(g.lat,g.lon)]);
+    const [hz,mc,qk]=await Promise.all([hazardAt(g.lat,g.lon),muniCode(g.lat,g.lon),quakeAt(g.lat,g.lon)]);g.qk=qk;
     const code0=mc&&D.muni[mc]?mc:nearest(g.lat,g.lon,1)[0][0].c;
     msg.textContent='近くで実際に売れた価格を読み込んでいます…';
     await loadTx(code0).catch(()=>null);
@@ -365,6 +398,7 @@ function evaluate(e,g,hz,mc){
   const pj=D.projects.map(q=>({q,d:distM(lat,lon,q.lat,q.lon)})).filter(x=>x.d<3000).sort((a,b)=>a.d-b.d).slice(0,6);
   const f={hz,g5:gw?g5/gw:null,h:h2,pop:m?m[2]:null,muniName:m?m[1]:'',st:st[0],walk:Math.round(st[1]*1.25),pj};
   const lqp=nb[0]&&nb[0][1]<1500?nb[0][0].lq:null;if(lqp)f.lq=lqp;
+  f.qk=g.qk||(nb[0]&&nb[0][1]<300?nb[0][0].qk:null);f.tokyo=String(code).startsWith('13');f.fr=f.tokyo?fireAt(lat,lon):null;
   const r=score(f);
   // 割安度
   const price=+e.price*1e4,area=+e.area,barea=+e.barea,age=+e.age;let val=null;
@@ -386,16 +420,17 @@ function showEval(x){
     <div class="box"><small>判定</small><b><span class="tag ${j[1]}" style="font-size:15px">${j[0]}</span> ${(p*100).toFixed(0)}%</b></div></div><div class="note">計算：${esc(val.how)}</div>`}
   if(val&&val.cmp&&val.cmp.length)valHtml+=`<h3>比べた売買事例（近い順）</h3>${val.cmp.map(txItemHtml).join('')}`;
   else if(!val&&e.kind==='mansion')valHtml=`<div class="warnbox">${Object.keys(D.txindex||{}).length?(e.age===''?'築年数を入れると、近くで実際に売れたマンションと比べて割安・割高を判定できます。':'この近くで比べられる売買事例が足りないため、判定できませんでした。'):'マンションの割安・割高は、近くで実際に売れたマンションの価格と比べて判定します。国の売買価格データが取り込まれると使えるようになります。'}<br>参考：この場所の土地の値段は約${unit(Math.round(x.landPrice))}/㎡です。</div>`;
+  let bld='';if(e.kind!=='land'&&e.age!==''&&e.age!=null){const by=new Date().getFullYear()-(+e.age);bld=by<=1981?`<div class="warnbox" style="margin-top:8px">築${e.age}年（${by}年ごろの建築）は、旧耐震基準（1981年5月以前）の可能性があります。地震での被害が大きくなりやすく、ローンや保険にも影響します。耐震診断・補強の有無を確認してください。</div>`:''}
   let yld='';if(e.rent&&price){const y=e.rent*1e4*12/price*100;yld=`<div class="box"><small>表面利回り（家賃×12÷価格）</small><b>${y.toFixed(2)}%</b></div>`}
   box.innerHTML=`<div class="card">
     <div class="big"><div class="grade g${r.grade}"><b>${r.grade}</b><small>${r.total}点</small></div>
     <div><b>${esc(g.title)}</b><div class="note">${m?esc(m[0]+' '+m[1]):''}・${esc(x.st.n)}駅まで直線${Math.round(x.stD).toLocaleString()}m</div>
     <div class="tags">${r.tags.map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}</div></div></div>
     ${val||e.kind==='mansion'?'<h3>価格は相場と比べてどうか</h3>'+valHtml:''}
-    ${yld?`<div class="boxes">${yld}</div>`:''}
+    ${yld?`<div class="boxes">${yld}</div>`:''}${bld}
     <div style="height:10px"></div><button class="btn sub" onclick="saveEval()">☆ この評価を保存</button></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(r)}<div class="note">駅までの距離は直線距離×1.25で見積もっています。</div></div>
-  <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz,x.f.lq)}</div>
+  <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz,x.f.lq,x.f.qk,x.f.fr,x.f.tokyo)}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(x.f.pj)}</div>
   <div class="card"><h2>将来の人口</h2>${popHtml(m)}</div>
   ${newsCard([x.code])}
@@ -423,17 +458,19 @@ function renderInfo(m){
   m.innerHTML=updatedCard()+newsCard(null,30)+`<div class="card"><h2>評価のしかた（100点満点）</h2>
   <table class="t">
   <tr><th>項目</th><th>点</th><th>見ていること</th></tr>
-  <tr><td>安全性</td><td>25</td><td>洪水・高潮・津波の浸水の深さ、土砂災害の警戒区域、液状化のしやすさ（データがある場合）。深いほど・レッドゾーンほど減点</td></tr>
-  <tr><td>将来性</td><td>25</td><td>地価の5年の上がり方（15点）＋近くの新駅・延伸・再開発（10点。事業中＞計画＞構想、近いほど高い）</td></tr>
-  <tr><td>人口</td><td>20</td><td>市区町村の2035年の人口予測（14点）＋最寄り駅の乗降客数の回復・増加（6点）</td></tr>
-  <tr><td>利便性</td><td>20</td><td>駅からの距離（10点）＋駅の乗降客数の多さ（10点）</td></tr>
-  <tr><td>値動きの安定</td><td>10</td><td>10年の上がり方（6点）＋途中で下がった幅の小ささ（4点）</td></tr></table>
+  <tr><td>水害・土砂</td><td>20</td><td>洪水・高潮・津波の浸水の深さ、土砂災害の警戒区域。深いほど・レッドゾーンほど減点</td></tr>
+  <tr><td>地震・火災</td><td>15</td><td>30年以内に震度6強以上の揺れの確率、地盤の揺れやすさ、液状化しやすい地形（J-SHIS）、東京都の火災・建物倒壊危険度ランク</td></tr>
+  <tr><td>将来性</td><td>22</td><td>地価の5年の上がり方（15点）＋近くの新駅・延伸・再開発（10点。事業中＞計画＞構想、近いほど高い）</td></tr>
+  <tr><td>人口</td><td>18</td><td>市区町村の2035年の人口予測（14点）＋最寄り駅の乗降客数の回復・増加（6点）</td></tr>
+  <tr><td>利便性</td><td>17</td><td>駅からの距離（10点）＋駅の乗降客数の多さ（10点）</td></tr>
+  <tr><td>値動きの安定</td><td>8</td><td>10年の上がり方（6点）＋途中で下がった幅の小ささ（4点）</td></tr></table>
   <p class="note">S＝78点以上、A＝68〜77、B＝58〜67、C＝48〜57、D＝47以下。</p></div>
   <div class="card"><h2>このアプリでできないこと（大事）</h2>
   <ul class="note" style="font-size:13px">
   <li>アットホーム・SUUMOの物件そのものは載せていません（各サイトの規約で、許可のない転載が禁止されているため）。各地点・評価画面のボタンから、同じ地域の売り物件を開けます。</li>
   <li>${Object.keys(D.txindex||{}).length?'売買事例は国の不動産情報ライブラリの公開データです（住所は町丁まで。番地や物件名は公表されていません）。':'売買事例とマンションの割安判定は、国の売買価格データが取り込まれると使えます。'}</li>
-  <li>内水氾濫・地盤の強さ・建物の状態・管理状態は評価に入っていません。</li>
+  <li>火災・建物倒壊の危険度は、町丁目ごとに公表している東京都のみ評価に入っています（ほかの県は地震の揺れと地形まで）。</li>
+  <li>内水氾濫・建物の状態（耐震・築年）・管理状態は、場所の評価には入っていません。</li>
   <li>新駅・再開発の一覧は調べた時点のもので、開業時期は変わることがあります。最新の動きは上の「最新ニュース」で確認できます（毎週自動更新）。</li>
   <li>この評価は目安です。購入前には、現地・重要事項説明・ハザードマップを必ず確認してください。</li></ul></div>
   <div class="card"><h2>新駅・延伸・再開発の一覧（${D.projects.length}件）</h2>${projList(D.projects.map(q=>({q,d:0}))).replace(/<td style="white-space:nowrap">0\.0km<br>/g,'<td style="white-space:nowrap">')}</div>
@@ -490,4 +527,17 @@ function renderLinks(m){
   <div class="chips">${PREFS.map(([c,n])=>`<button class="chip ${pc===c?'on':''}" onclick="LS.set('linkPref','${c}');renderLinks($('#main'))">${n}</button>`).join('')}</div>
   ${linkGroups(pc,'').map(linkGroupHtml).join('')}
   <div class="note" style="margin-top:10px">気になる物件を見つけたら、住所と価格を「物件を評価」に入れると、災害・将来性・相場との比較が出ます。</div></div>`;
+}
+
+// ---------- 地震（J-SHIS）・火災（東京都）をその場で調べる ----------
+async function quakeAt(lat,lon){
+  try{
+    const get=async p=>{const ac=new AbortController();setTimeout(()=>ac.abort(),8000);const r=await fetch(`https://www.j-shis.bosai.go.jp/map/api/${p}/meshinfo.geojson?position=${lon},${lat}&epsg=4326`,{signal:ac.signal});return (await r.json()).features[0].properties};
+    const [a,b]=await Promise.all([get('pshm/Y2024/AVR/TTL_MTTL'),get('sstrct/V4')]);
+    return [+a.T30_I55_PS||0,+a.T30_I60_PS||0,+b.ARV||null,b.JNAME||''];
+  }catch(e){return null}
+}
+function fireAt(lat,lon){
+  let best=null,bd=800;for(const f of D.fire||[]){const d=distM(lat,lon,f[1],f[2]);if(d<bd){bd=d;best=f}}
+  return best?[best[3],best[4],best[5],0,best[0]]:null;
 }

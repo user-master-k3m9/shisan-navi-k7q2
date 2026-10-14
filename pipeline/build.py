@@ -6,7 +6,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import openpyxl
 from common import ROOT, DATA, PREFS, load, save, dist, ckey
-import base, hazard, reinfo, news, csvimport
+import base, hazard, reinfo, news, csvimport, quake, fire
 
 TODAY = datetime.date.today().isoformat()
 
@@ -102,6 +102,31 @@ def main():
         rows, geo, liq = rr
         meta['tx'] = TODAY
         hazard.lookup([(v[0], v[1]) for v in geo.values() if v])  # 地区の位置の災害もまとめて判定
+    # 地震（J-SHIS）と東京都の火災・倒壊危険度
+    try:
+        fires = fire.update()
+    except Exception as e:
+        print('地域危険度の取得に失敗（前回分を使う）', e, flush=True); fires = load('fire_tokyo.json', [])
+    fires = [f for f in fires if f.get('la') is not None]
+    fg = Grid(fires, lambda f: (f['la'], f['lo']))
+    qk_coords = list(coords)
+    if rr:
+        qk_coords += [(v[0], v[1]) for v in rr[1].values() if v]
+    qc = quake.lookup(qk_coords, budget_min=100)
+
+    def quake_at(la, lo):
+        v = qc.get(quake.mesh250(la, lo))
+        return [v['p6l'], v['p6u'], v['arv'], v['geo']] if v else None
+
+    def fire_at(la, lo, code):
+        if not code.startswith('13'):
+            return None
+        mname = names.get(code, '')
+        c = [i for i in fg.near(la, lo, 1) if fires[i]['m'] == mname and dist(la, lo, fires[i]['la'], fires[i]['lo']) < 800]
+        if not c:
+            return None
+        f = fires[min(c, key=lambda i: dist(la, lo, fires[i]['la'], fires[i]['lo']))]
+        return [f['b'], f['f'], f['t'], f['a'], f['n']]
     sg = Grid(sts, lambda s: (s['lat'], s['lon']))
     byname = defaultdict(list)
     for i, s in enumerate(sts):
@@ -122,6 +147,12 @@ def main():
         lq = liq.get(ckey(la, lo))
         if lq:
             o['lq'] = lq
+        q = quake_at(la, lo)
+        if q:
+            o['qk'] = q
+        fr = fire_at(la, lo, p['code'])
+        if fr:
+            o['fr'] = fr
         out.append(o)
 
     # ---- 売買事例（市区町村ごとのファイル）----
@@ -143,9 +174,9 @@ def main():
                     if g:
                         la, lo = g[0], g[1]
                         np_ = pg.nearest(la, lo)
-                        dl.append([r['dist'], la, lo, hz_point(la, lo), liq.get(ckey(la, lo)), out[np_]['i'] if np_ >= 0 else -1])
+                        dl.append([r['dist'], la, lo, hz_point(la, lo), liq.get(ckey(la, lo)), out[np_]['i'] if np_ >= 0 else -1, quake_at(la, lo), fire_at(la, lo, code)])
                     else:
-                        dl.append([r['dist'], None, None, {}, None, -1])
+                        dl.append([r['dist'], None, None, {}, None, -1, None, None])
                     di[q] = len(dl) - 1
                 unit = r['unit'] or (round(r['price'] / r['area']) if r['area'] else None)
                 recs.append([r['t'], 1 if r['c'] == '成約' else 0, di[q], r['price'], r['area'], unit, r['plan'], r['tfa'], r['by'], r['st'],
@@ -170,7 +201,10 @@ def main():
     if meta.get('tx'):
         src['売買'] = '国土交通省 不動産情報ライブラリ 不動産価格（取引価格・成約価格）情報（%s%s）' % (meta['tx'], '取得' if meta.get('txsrc') == 'API' else '取込・画面からダウンロードしたCSV')
         src['液状化'] = '国土交通省都市局 地形区分に基づく液状化の発生傾向図（不動産情報ライブラリ経由）'
-    save('data.json', dict(points=out, stations=sts, muni=munis, projects=proj, built=TODAY, meta=meta, txindex=txindex, sources=src), root=ROOT)
+    src['地震'] = '防災科学技術研究所 J-SHIS 確率論的地震動予測地図（2024年版）・表層地盤（250mメッシュ）'
+    src['火災'] = '東京都 地震に関する地域危険度測定調査（第9回・町丁目別。東京都のみ）'
+    firel = [[f['m'] + f['n'], f['la'], f['lo'], f['b'], f['f'], f['t']] for f in fires]
+    save('data.json', dict(fire=firel, points=out, stations=sts, muni=munis, projects=proj, built=TODAY, meta=meta, txindex=txindex, sources=src), root=ROOT)
     print('完成', len(out), '地点', os.path.getsize(os.path.join(ROOT, 'data.json')) // 1024, 'KB', flush=True)
 
 
