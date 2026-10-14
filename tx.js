@@ -280,7 +280,7 @@ function updateBox(){
   return `<div class="card"><h2>売買データを最新にする</h2>
   <div class="note">今のデータ：${q?perTxt(q)+'まで':'なし'}${n?`（この端末で取り込んだ ${n.toLocaleString()}件を含む）`:''}。国は3か月ごとに新しい期間を追加します。</div>
   <button class="btn" id="auto_btn" style="margin-top:10px" onclick="autoUpdate()">最新の売買データをダウンロード（自動）</button>
-  <div id="auto_msg" class="note" style="margin-top:6px">押すと、Macが国のサイトからダウンロード・解凍・取り込み・公開まで行い、終わるとこのアプリが自動で最新になります（数分）。</div>
+  <div id="auto_msg" class="note" style="margin-top:6px">${(()=>{const j=LS.get('justUpdated','');if(j){LS.set('justUpdated','');return '<b style="color:var(--good)">✓ '+esc(j)+'</b><br>'}return''})()}押すと、Macが国のサイトからダウンロード・解凍・取り込み・公開まで行い、終わるとこのアプリが自動で最新になります（数分）。</div>
   <details style="margin-top:10px"><summary class="note">Macが使えないとき（手動で取り込む）</summary>
   <ol class="note" style="font-size:13px;padding-left:18px;margin:8px 0">
   <li>下のボタンで国のサイトを開く</li>
@@ -382,7 +382,7 @@ function autoUpdate(){
   if(es)es.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
     const [k,txt]=String(m.message||'').split('|');if(!txt)return;
     started=true;show(txt);
-    if(k==='done'){end();show(txt+' 読み込み直します…');setTimeout(()=>location.reload(),1500)}
+    if(k==='done'){end();show(txt+' 読み込み直します…');LS.set('justUpdated',txt);setTimeout(()=>location.reload(),1500)}
     if(k==='error'||k==='recent')end();};
   // 受け手の準備ができてから合図を送る
   setTimeout(()=>{fetch(NTFY+TOPIC,{method:'POST',body:'update'}).then(()=>show('Macに合図を送りました。返事を待っています…')).catch(()=>{show('合図を送れませんでした。電波の良い所でもう一度押してください。');end()})},1200);
