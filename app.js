@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v9';
+const VER='v10';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -188,7 +188,7 @@ function filt(){
 }
 function count(){return filt().length.toLocaleString()}
 function doSearch(){LS.set('filter',F);results=null;shown=40;go('list')}
-const SORTS={score:['評価が高い順',(a,b)=>b.r.total-a.r.total],cheap:['安い順',(a,b)=>a.pr-b.pr],dear:['高い順',(a,b)=>b.pr-a.pr],up:['5年の上昇率順',(a,b)=>(b.g5??-9)-(a.g5??-9)],yoy:['前年比が高い順',(a,b)=>b.yo-a.yo],walk:['駅に近い順',(a,b)=>a.sd-b.sd]};
+const SORTS={score:['評価が高い順',(a,b)=>b.r.total-a.r.total],cheap:['安い順',(a,b)=>a.pr-b.pr],dear:['高い順',(a,b)=>b.pr-a.pr],up:['5年の上昇率順',(a,b)=>(b.g5??-9)-(a.g5??-9)],yoy:['前年比が高い順',(a,b)=>b.yo-a.yo],walk:['駅に近い順',(a,b)=>a.sd-b.sd],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.sn,b.sn)||b.r.total-a.r.total]};
 function getResults(){if(!results){results=filt().sort(SORTS[S.sort][1])}return results}
 
 // ---------- 一覧 ----------
@@ -201,14 +201,16 @@ function itemHtml(p){
       <div class="m">${esc(p.sn)}駅 徒歩${walkMin(p.sd)}分・${p.cat}・${p.s==='公示'?'公示2026':'調査2025'}・${esc(p.z||'')}</div>
       <div><span class="price">${unit(p.pr)}/㎡</span> <span class="m">坪${unit(Math.round(p.pr*3.30579))}・前年比${p.yo>=0?'+':''}${p.yo}%</span></div>
       <div class="tags">${p.r.tags.slice(0,5).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}</div>
+      ${viewLinks({lat:p.la,lon:p.lo,code:p.c,town:townOf(p.a,p.c),kind:p.cat==='住宅地'?'all':'all',small:true})}
     </div></div>`;
 }
 function renderList(m){
-  const r=getResults();
-  m.innerHTML=`<div class="bar"><span class="n">${r.length.toLocaleString()}件</span>
+  const r0=getResults(),r=S.stF?r0.filter(p=>p.sn===S.stF):r0;
+  m.innerHTML=modeSwitch()+`<div class="bar"><span class="n">${r.length.toLocaleString()}件</span>
     <select id="sort" style="width:auto;flex:1">${Object.entries(SORTS).map(([k,[n]])=>`<option value="${k}" ${S.sort===k?'selected':''}>${n}</option>`).join('')}</select>
     <button class="btn sm sub" onclick="go('search')">条件を変える</button></div>
-    <div id="items">${r.slice(0,shown).map(itemHtml).join('')}</div>
+    ${stationSelect(r0.map(p=>p.sn),S.stF,'S.stF=this.value;shown=40;renderList($(\'#main\'))')}
+    <div id="items">${grouped(r.slice(0,shown),S.sort==='station',p=>p.sn,itemHtml)}</div>
     ${r.length>shown?`<button class="btn sub" onclick="shown+=40;renderList($('#main'))">もっと見る（残り${(r.length-shown).toLocaleString()}件）</button>`:''}
     ${!r.length?'<div class="card">条件に合う地点がありません。条件をゆるめてください。</div>':''}`;
   $('#sort').onchange=e=>{S.sort=e.target.value;results=null;shown=40;renderList(m)};
@@ -312,6 +314,8 @@ function renderDetail(m){
     <div style="height:10px"></div>
     <button class="btn sub" onclick="togFav(${p.i})">${isFav?'★ 保存済み（タップで外す）':'☆ 保存する'}</button>
   </div>
+  <div class="card"><h2>この場所を見る</h2>${viewLinks({lat:p.la,lon:p.lo,code:p.c,town:townOf(p.a,p.c),kind:'all'})}
+    <div class="note">地価地点は国が値段を調べた土地で、売り物件ではありません。ストリートビューで現地を、SUUMOで同じ町の売り物件を見られます。</div></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(p.r)}</div>
   <div class="card"><h2>地価の推移（1㎡あたり）</h2>${lineChart(h,h.map((_,i)=>i%2===0?String(yr-10+i).slice(2)+'年':''),v=>(v/1e4).toFixed(v>=1e5?0:1)+'万')}</div>
   <div class="card"><h2>災害リスク（水害・土砂・地震・火災）</h2>${hazardTable(p.hz,p.lq,p.qk,p.fr,p.c.startsWith('13'))}</div>
@@ -403,7 +407,7 @@ function evaluate(e,g,hz,mc){
   // 割安度
   const price=+e.price*1e4,area=+e.area,barea=+e.barea,age=+e.age;let val=null;
   const MARKET=1.15;// 公示地価→実際の売買価格のおおよその補正（関東・近年）
-  const cmp=txCompare(e,lat,lon,code);
+  const cmp=txCompare(e,lat,lon,code,f.walk);
   if(price&&area&&cmp&&cmp.est){val={est:cmp.est,ratio:price/cmp.est,how:cmp.how,cmp:cmp.list}}
   else if(price&&area){
     if(e.kind==='land'){const est=landPrice*MARKET*area;val={est,ratio:price/est,how:`近くの地価 ${unit(Math.round(landPrice))}/㎡ ×補正1.15 × ${area}㎡`}}
@@ -428,6 +432,8 @@ function showEval(x){
     <div class="tags">${r.tags.map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}</div></div></div>
     ${val||e.kind==='mansion'?'<h3>価格は相場と比べてどうか</h3>'+valHtml:''}
     ${yld?`<div class="boxes">${yld}</div>`:''}${bld}
+    <h3>この物件を見る</h3>${e.url?`<a class="btn sm" style="margin-bottom:8px" target="_blank" rel="noopener" href="${esc(e.url)}">入力した物件ページを開く ↗</a>`:''}
+    ${viewLinks({lat:g.lat,lon:g.lon,code:x.code||x.nb[0][0].c,town:townOf(g.title,x.code||x.nb[0][0].c),kind:{mansion:'m',house:'h',land:'l'}[e.kind]})}
     <div style="height:10px"></div><button class="btn sub" onclick="saveEval()">☆ この評価を保存</button></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(r)}<div class="note">駅までの距離は直線距離×1.25で見積もっています。</div></div>
   <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz,x.f.lq,x.f.qk,x.f.fr,x.f.tokyo)}</div>
@@ -540,4 +546,36 @@ async function quakeAt(lat,lon){
 function fireAt(lat,lon){
   let best=null,bd=800;for(const f of D.fire||[]){const d=distM(lat,lon,f[1],f[2]);if(d<bd){bd=d;best=f}}
   return best?[best[3],best[4],best[5],0,best[0]]:null;
+}
+
+// ---------- 物件・現地を見るリンク／駅でまとめる ----------
+let PAX=null;
+function pax(n){if(!PAX){PAX={};for(const s of D.stations)PAX[s.n]=Math.max(PAX[s.n]||0,s.p24||0)}return PAX[n]||0}
+function stCmp(a,b){a=a||'';b=b||'';if(a===b)return 0;if(!a)return 1;if(!b)return -1;return (pax(b)-pax(a))||a.localeCompare(b,'ja')}
+function stationSelect(names,cur,onch){
+  const c={};for(const n of names){const k=n||'';c[k]=(c[k]||0)+1}
+  const ks=Object.keys(c).filter(Boolean).sort(stCmp);if(ks.length<2&&!cur)return'';
+  return `<div class="bar"><span class="note" style="flex:0 0 auto">駅で絞る</span><select style="flex:1" onchange="${onch}"><option value="">すべての駅（${ks.length}駅）</option>${ks.map(k=>`<option value="${esc(k)}" ${k===cur?'selected':''}>${esc(k)}駅（${c[k]}件）</option>`).join('')}</select></div>`;
+}
+function grouped(list,on,key,fn){
+  if(!on)return list.map(fn).join('');
+  let out='',last=null;
+  for(const x of list){const k=key(x)||'';if(k!==last){out+=`<h3 style="margin:14px 0 6px">${k?esc(k)+'駅':'駅不明'}<span class="note">　1日${pax(k)?Math.round(pax(k)).toLocaleString()+'人':''}</span></h3>`;last=k}out+=fn(x)}
+  return out;
+}
+// 住所から町名（丁目・番地の前まで）を取り出す
+function townOf(addr,code){
+  let a=String(addr||'').normalize('NFKC').replace(/^(東京都|神奈川県|埼玉県|千葉県|茨城県|栃木県|群馬県)\s*/,'');
+  const m=D.muni[code];if(m&&a.startsWith(m[1]))a=a.slice(m[1].length);
+  a=a.replace(/^大字/,'');
+  const r=a.match(/^(.+?)(?:[一二三四五六七八九十]+丁目|\d|字|番|$)/);return r?r[1]:a;
+}
+const BS={m:['011','中古マンション'],h:['021','中古一戸建て'],l:['030','土地']};
+function suumoTown(t,code,town){return `https://suumo.jp/jj/bukken/ichiran/JJ010FJ001/?ar=030&bs=${BS[t][0]}&ta=${code.slice(0,2)}&sc=${code}${town?'&fw='+encodeURIComponent(town):''}`}
+function viewLinks({lat,lon,code,town,kind,small}){
+  const sv=`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`,gm=`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+  const ts=kind==='all'?['m','h','l']:[kind];
+  const a=(h,t)=>`<a class="${small?'chip':'btn sub sm'}" style="${small?'font-size:12px;padding:3px 9px;text-decoration:none;color:var(--acc)':''}" target="_blank" rel="noopener" href="${esc(h)}" onclick="event.stopPropagation()">${t} ↗</a>`;
+  if(small)return `<div class="chips" style="margin-top:6px">${a(sv,'ストリートビュー')}${a(suumoTown(ts[0],code,town),(town?esc(town)+'の':'この町の')+(ts.length>1?'売り物件':BS[ts[0]][1]))}</div>`;
+  return `<div class="links">${a(sv,'ストリートビュー（現地の写真）')}${a(gm,'Googleマップ（場所）')}${ts.map(t=>a(suumoTown(t,code,town),`${town?esc(town)+'の':''}${BS[t][1]}（SUUMO）`)).join('')}</div>`;
 }

@@ -41,20 +41,31 @@ async function loadTx(code){
   TX.files[code]=f;return f;
 }
 function median(a){if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2}
-// ln(㎡単価) = a + b×築年数 （マンション・戸建て）／土地は中央値
+// ln(㎡単価) = a + b×築年数 + c×駅徒歩分 （マンション・戸建て）／土地は中央値
+function ols(X,y){// 最小二乗（列数3まで）
+  const k=X[0].length,A=Array.from({length:k},()=>Array(k+1).fill(0));
+  for(let i=0;i<X.length;i++)for(let r=0;r<k;r++){for(let c=0;c<k;c++)A[r][c]+=X[i][r]*X[i][c];A[r][k]+=X[i][r]*y[i]}
+  for(let c=0;c<k;c++){let p=c;for(let r=c+1;r<k;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;[A[c],A[p]]=[A[p],A[c]];if(Math.abs(A[c][c])<1e-12)return null;
+    for(let r=0;r<k;r++)if(r!==c){const f=A[r][c]/A[c][c];for(let j=c;j<=k;j++)A[r][j]-=f*A[c][j]}}
+  return A.map((r,i)=>r[k]/r[i]);
+}
+const WM=w=>Math.min(w,30);
 function fitModel(rs){
   const md=median(rs.map(o=>o.unit));if(md==null)return null;
   const xs=rs.filter(o=>o.age!=null&&o.age<=60);
   if(xs.length<10)return {med:md,a:null};
-  const n=xs.length,mx=xs.reduce((s,o)=>s+o.age,0)/n,my=xs.reduce((s,o)=>s+Math.log(o.unit),0)/n;
-  let sxy=0,sxx=0;for(const o of xs){sxy+=(o.age-mx)*(Math.log(o.unit)-my);sxx+=(o.age-mx)**2}
-  const b=sxx?sxy/sxx:0;return {med:md,a:my-b*mx,b,n};
+  const b2=ols(xs.map(o=>[1,o.age]),xs.map(o=>Math.log(o.unit)));
+  const ws=xs.filter(o=>o.stm!=null);
+  const b3=ws.length>=30?ols(ws.map(o=>[1,o.age,WM(o.stm)]),ws.map(o=>Math.log(o.unit))):null;
+  return {med:md,a:b2?b2[0]:null,b:b2?b2[1]:0,w:b3&&b3[2]<0.02?b3:null,n:xs.length};
 }
-function expUnit(f,t,age){const m=f.model[t];if(!m)return null;if(t!=='l'&&m.a!=null&&age!=null)return Math.exp(m.a+m.b*Math.min(age,60));return m.med}
+function expUnit(f,t,age,stm){const m=f.model[t];if(!m)return null;
+  if(t!=='l'&&age!=null){if(m.w&&stm!=null)return Math.exp(m.w[0]+m.w[1]*Math.min(age,60)+m.w[2]*WM(stm));if(m.a!=null)return Math.exp(m.a+m.b*Math.min(age,60))}
+  return m.med}
 function ratioOf(f,o){
   if(!o.unit)return null;
   if(o.t==='l'){const same=f.recs.filter(x=>x.t==='l'&&x.D===o.D&&x.unit>0);const md=same.length>=5?median(same.map(x=>x.unit)):f.model.l&&f.model.l.med;return md?o.unit/md:null}
-  const e=expUnit(f,o.t,o.age);return e?o.unit/e:null;
+  const e=expUnit(f,o.t,o.age,o.stm);return e?o.unit/e:null;
 }
 const ratioTag=r=>r==null?null:r<0.85?['相場より割安 '+Math.round(r*100)+'%','good']:r>1.15?['相場より割高 '+Math.round(r*100)+'%','bad']:['相場並み '+Math.round(r*100)+'%',''];
 
@@ -146,7 +157,7 @@ function txFilt(){
     }}
   return out;
 }
-const TSORT={score:['場所の評価が高い順',(a,b)=>((b.D.sc&&b.D.sc.r.total)||0)-((a.D.sc&&a.D.sc.r.total)||0)],cheap:['割安な順（相場比）',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>a.price-b.price],dear:['高い順',(a,b)=>b.price-a.price],unit:['㎡単価が安い順',(a,b)=>(a.unit||9e9)-(b.unit||9e9)],new:['新しい順',(a,b)=>(b.per||0)-(a.per||0)],area:['広い順',(a,b)=>(b.area||0)-(a.area||0)]};
+const TSORT={score:['場所の評価が高い順',(a,b)=>((b.D.sc&&b.D.sc.r.total)||0)-((a.D.sc&&a.D.sc.r.total)||0)],cheap:['割安な順（相場比）',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>a.price-b.price],dear:['高い順',(a,b)=>b.price-a.price],unit:['㎡単価が安い順',(a,b)=>(a.unit||9e9)-(b.unit||9e9)],new:['新しい順',(a,b)=>(b.per||0)-(a.per||0)],area:['広い順',(a,b)=>(b.area||0)-(a.area||0)],walk:['駅に近い順',(a,b)=>(a.stm??99)-(b.stm??99)],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.stn,b.stn)||(a.stm??99)-(b.stm??99)]};
 let tsort=LS.get('tsort','score');
 function getTx(){if(!TX.res)TX.res=txFilt().sort(TSORT[tsort][1]);return TX.res}
 
@@ -165,16 +176,18 @@ function txItemHtml(o){
       <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
       <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${bldTags(o).map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${o.stm!=null&&o.stm<=7?`<span class="tag good">駅徒歩${o.stm}分</span>`:''}</div>
+      ${o.D.la!=null?viewLinks({lat:o.D.la,lon:o.D.lo,code:o.code,town:o.D.n,kind:o.t,small:true}):''}
     </div></div>`;
 }
 function renderTxList(m){
   if(!FT.munis.length||!FT.munis.every(c=>TX.files[c])){m.innerHTML=modeSwitch()+'<div class="card">「さがす」で市区町村を選んで検索してください。</div>';return}
-  const r=getTx();
+  const r0=getTx(),r=TX.stF?r0.filter(o=>o.stn===TX.stF):r0;
   m.innerHTML=modeSwitch()+`<div class="bar"><span class="n">${r.length.toLocaleString()}件</span>
     <select id="tsort" style="width:auto;flex:1">${Object.entries(TSORT).map(([k,[n]])=>`<option value="${k}" ${tsort===k?'selected':''}>${n}</option>`).join('')}</select>
     <button class="btn sm sub" onclick="go('search')">条件を変える</button></div>
+    ${stationSelect(r0.map(o=>o.stn),TX.stF,'TX.stF=this.value;shown=40;renderTxList($(\'#main\'))')}
     ${marketHtml(r)}
-    <div>${r.slice(0,shown).map(txItemHtml).join('')}</div>
+    <div>${grouped(r.slice(0,shown),tsort==='station',o=>o.stn,txItemHtml)}</div>
     ${r.length>shown?`<button class="btn sub" onclick="shown+=40;renderTxList($('#main'))">もっと見る（残り${(r.length-shown).toLocaleString()}件）</button>`:''}
     ${!r.length?'<div class="card">条件に合う売買事例がありません。条件をゆるめてください。</div>':''}`;
   $('#tsort').onchange=e=>{tsort=e.target.value;LS.set('tsort',tsort);TX.res=null;shown=40;renderTxList(m)};
@@ -195,18 +208,21 @@ function showTx(code,k){S.prev=S.tab;S.detail=code+':'+k;render();window.scrollT
 function renderTxDetail(m){
   const [code,k]=S.detail.split(':'),f=TX.files[code];
   if(!f){S.detail=null;return render()}
-  const o=f.recs[+k],sc=districtScore(o.D,code),mu=D.muni[code],rt=ratioTag(o.ratio),e=expUnit(f,o.t,o.age);
+  const o=f.recs[+k],sc=districtScore(o.D,code),mu=D.muni[code],rt=ratioTag(o.ratio),e=expUnit(f,o.t,o.age,o.stm);
   m.innerHTML=`<button class="back" onclick="S.detail=null;go(S.prev)">‹ 戻る</button>
   <div class="card"><div class="big"><div class="grade g${sc?sc.r.grade:'D'}"><b>${sc?sc.r.grade:'－'}</b><small>${sc?sc.r.total+'点':''}</small></div>
     <div><div style="font-weight:700">${esc(txTitle(o))}</div><div class="note">${esc(mu?mu[0]+' '+mu[1]:'')}${esc(o.D.n)}・${perTxt(o.per)}に${o.closed?'成約':'取引'}</div>
-    <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${sc?sc.r.tags.map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join(''):''}</div></div></div>
+    <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${bldTags(o).map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')}${sc?sc.r.tags.filter(x=>!/^駅徒歩/.test(x[0])).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join(''):''}</div></div></div>
     <div class="boxes">
       <div class="box"><small>価格</small><b>${man(o.price)}</b></div>
       ${o.unit?`<div class="box"><small>1㎡あたり</small><b>${unit(o.unit)}</b></div>`:''}
-      ${e?`<div class="box"><small>同じ市区町村の相場（${o.t==='l'?'土地の中央値':'築'+(o.age??'?')+'年なら'}）</small><b>${unit(Math.round(e))}/㎡</b></div>`:''}
+      ${e?`<div class="box"><small>同じ市区町村の相場（${o.t==='l'?'土地の中央値':'築'+(o.age??'?')+'年'+(o.stm!=null&&f.model[o.t]&&f.model[o.t].w?'・駅徒歩'+o.stm+'分':'')+'なら'}）</small><b>${unit(Math.round(e))}/㎡</b></div>`:''}
       ${o.ratio?`<div class="box"><small>相場比</small><b>${Math.round(o.ratio*100)}%</b></div>`:''}
     </div>
-    <div class="note" style="margin-top:6px">相場は、同じ市区町村で直近3年に売れた同じ種類の物件から、築年数による値下がりを考えて計算しています${o.t==='l'?'（土地は同じ町丁に5件以上あればその中央値）':''}。</div></div>
+    <div class="note" style="margin-top:6px">相場は、同じ市区町村で直近3年に売れた同じ種類の物件から、築年数と駅からの徒歩分数による価格の違いを考えて計算しています${o.t==='l'?'（土地は同じ町丁に5件以上あればその中央値）':''}。</div></div>
+  <div class="card"><h2>この物件を見る</h2>
+    ${o.D.la!=null?viewLinks({lat:o.D.la,lon:o.D.lo,code,town:o.D.n,kind:o.t}):''}
+    <div class="note">国の売買データは、個人が特定されないよう番地・物件名・部屋番号が公表されていません。そのため、売れた物件そのもののページはありません。ストリートビューは${esc(o.D.n)}の中心付近を、SUUMOは同じ町で今売り出し中の${BS[o.t][1]}を開きます。</div></div>
   <div class="card"><h2>物件の情報</h2><dl class="kv">
     <dt>種類</dt><dd>${TYPE_N[o.t]}</dd>${o.stn?`<dt>最寄り駅</dt><dd>${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}</dd>`:''}<dt>面積</dt><dd>${o.area??'—'}㎡${o.tfa?`（延床 ${o.tfa}㎡）`:''}</dd>
     ${o.plan?`<dt>間取り</dt><dd>${esc(o.plan)}</dd>`:''}<dt>建築年</dt><dd>${o.by?o.by+'年':'—'}</dd>
@@ -243,7 +259,7 @@ function renderTxMap(m){
 }
 
 // ---------- 物件評価：近くの売買事例と比べる ----------
-function txCompare(e,lat,lon,code){
+function txCompare(e,lat,lon,code,walkM){
   const f=TX.files[code];if(!f)return null;
   const t={mansion:'m',house:'h',land:'l'}[e.kind],age=e.age!==''&&e.age!=null?+e.age:null,area=+e.area;
   const near=f.recs.filter(o=>o.t===t&&o.unit>0&&o.D.la!=null).map(o=>[o,distM(lat,lon,o.D.la,o.D.lo)]).filter(x=>x[1]<2000).sort((a,b)=>a[1]-b[1]);
@@ -251,10 +267,11 @@ function txCompare(e,lat,lon,code){
   if(t==='l'){const u=near.slice(0,30).map(x=>x[0].unit);if(u.length<5)return null;base=median(u);how=`半径2km以内で売れた土地${u.length}件の㎡単価の中央値 ${unit(Math.round(base))} × ${area}㎡`}
   else{
     if(age==null)return {est:null,list:near.slice(0,5).map(x=>x[0])};
-    const ex=expUnit(f,t,age);if(!ex)return null;
+    const wmin=walkM!=null?Math.ceil(walkM/80):null;
+    const ex=expUnit(f,t,age,wmin);if(!ex)return null;
     const rs=near.filter(x=>x[1]<1500).map(x=>x[0].ratio).filter(v=>v!=null);
     const adj=rs.length>=5?median(rs):1;base=ex*adj;
-    how=`${D.muni[code]?D.muni[code][1]:''}で売れた${TYPE_S[t]}の相場（築${age}年なら ${unit(Math.round(ex))}/㎡）${rs.length>=5?`× この近く1.5km以内の事例${rs.length}件の傾向 ${Math.round(adj*100)}%`:''} × ${area}㎡`;
+    how=`${D.muni[code]?D.muni[code][1]:''}で売れた${TYPE_S[t]}の相場（築${age}年${wmin!=null&&f.model[t].w?'・駅徒歩約'+wmin+'分':''}なら ${unit(Math.round(ex))}/㎡）${rs.length>=5?`× この近く1.5km以内の事例${rs.length}件の傾向 ${Math.round(adj*100)}%`:''} × ${area}㎡`;
   }
   const list=near.filter(x=>age==null||x[0].age==null||Math.abs(x[0].age-age)<=10).slice(0,5).map(x=>x[0]);
   return {est:base*area,how,list};
