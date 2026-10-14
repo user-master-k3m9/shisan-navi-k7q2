@@ -32,6 +32,9 @@ async function loadTx(code){
   const ds=j.d.map(([n,la,lo,hz,lq,pi])=>({n,la,lo,hz:hz||{},lq,pi,sc:null}));
   const recs=j.r.map((a,k)=>{const o={code,k,t:a[0],closed:a[1],D:ds[a[2]],price:a[3],area:a[4],unit:a[5],plan:a[6]||'',tfa:a[7],by:a[8],st:a[9]||'',per:a[10],far:a[11],ren:a[12]||'',rem:a[13]||'',shape:a[14]||'',road:a[15],stn:a[16]||'',stm:a[17]};
     o.age=o.by&&o.per?Math.max(0,Math.floor(o.per/10)-o.by):null;return o});
+  // 町丁ごとに、国のデータに書かれた最寄り駅（一番多いもの）と徒歩分数（中央値）をまとめる
+  const sg=new Map();for(const o of recs){if(!o.stn)continue;const m=sg.get(o.D)||{};m[o.stn]=m[o.stn]||[];if(o.stm!=null)m[o.stn].push(o.stm);else m[o.stn].push(null);sg.set(o.D,m)}
+  for(const [d,m] of sg){const [n,a]=Object.entries(m).sort((x,y)=>y[1].length-x[1].length)[0];const mins=a.filter(x=>x!=null);d.stn=n;d.stm=mins.length?median(mins):null}
   const f={code,ds,recs,model:{}};
   for(const t of ['m','h','l'])f.model[t]=fitModel(recs.filter(o=>o.t===t&&o.unit>0));
   for(const o of recs)o.ratio=ratioOf(f,o);
@@ -60,7 +63,10 @@ function districtScore(d,code){
   if(d.sc)return d.sc;
   if(d.la==null){d.sc=null;return null}
   const p=TX.PI[d.pi],m=D.muni[code];
-  let st=null,sd=1e9;for(const s of D.stations){const x=distM(d.la,d.lo,s.lat,s.lon);if(x<sd){sd=x;st=s}}
+  let st=null,sd=1e9;
+  if(d.stn){for(const s of D.stations){if(s.n!==d.stn)continue;const x=distM(d.la,d.lo,s.lat,s.lon);if(x<sd&&x<6000){sd=x;st=s}}}
+  if(!st)for(const s of D.stations){const x=distM(d.la,d.lo,s.lat,s.lon);if(x<sd){sd=x;st=s}}
+  if(d.stm!=null){sd=d.stm*80/1.25}
   const pj=D.projects.map(q=>({q,d:distM(d.la,d.lo,q.lat,q.lon)})).filter(x=>x.d<3000).sort((a,b)=>a.d-b.d).slice(0,6);
   const f={hz:d.hz,lq:d.lq,g5:p?p.g5:null,h:p?p.h:null,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:Math.round(sd*1.25),pj};
   d.sc={f,r:score(f),st,sd};return d.sc;
@@ -153,7 +159,7 @@ function txItemHtml(o){
       <div class="t">${esc(txTitle(o))}</div>
       <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
-      <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${sc&&sc.sd<640?`<span class="tag good">${esc(sc.st.n)}駅 近い</span>`:''}</div>
+      <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${o.stm!=null&&o.stm<=7?`<span class="tag good">駅徒歩${o.stm}分</span>`:''}</div>
     </div></div>`;
 }
 function renderTxList(m){
@@ -202,7 +208,7 @@ function renderTxDetail(m){
     ${o.st?`<dt>構造</dt><dd>${esc(o.st)}</dd>`:''}${o.far?`<dt>容積率</dt><dd>${o.far}%</dd>`:''}${o.road?`<dt>前面道路</dt><dd>幅${o.road}m</dd>`:''}
     ${o.shape?`<dt>土地の形</dt><dd>${esc(o.shape)}</dd>`:''}${o.ren?`<dt>改装</dt><dd>${esc(o.ren)}</dd>`:''}${o.rem?`<dt>事情</dt><dd>${esc(o.rem)}</dd>`:''}
     <dt>出典</dt><dd>国土交通省 不動産情報ライブラリ（${o.closed?'成約価格':'取引価格'}）</dd></dl></div>
-  ${sc?`<div class="card"><h2>場所の評価の内訳（${esc(o.D.n)}の中心付近）</h2>${scoreHtml(sc.r)}<div class="note">住所は町丁までしか公表されていないため、町丁の中心付近で判定しています。駅まではその直線距離×1.25です。</div></div>
+  ${sc?`<div class="card"><h2>場所の評価の内訳（${esc(o.D.n)}の中心付近）</h2>${scoreHtml(sc.r)}<div class="note">住所は町丁までしか公表されていないため、町丁の中心付近で判定しています。駅までは、国のデータにある最寄り駅と徒歩分数（その町丁の中央値）を使っています。</div></div>
   <div class="card"><h2>災害リスク（町丁の中心付近）</h2>${hazardTable(o.D.hz,o.D.lq)}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(sc.f.pj)}</div>`:''}
   <div class="card"><h2>将来の人口</h2>${popHtml(mu)}</div>
