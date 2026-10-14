@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v2';
+const VER='v3';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -390,7 +390,7 @@ function showEval(x){
     valHtml=`<div class="boxes"><div class="box"><small>相場から見た目安</small><b>${man(val.est)}</b></div><div class="box"><small>売り出し価格</small><b>${man(price)}</b></div>
     <div class="box"><small>判定</small><b><span class="tag ${j[1]}" style="font-size:15px">${j[0]}</span> ${(p*100).toFixed(0)}%</b></div></div><div class="note">計算：${esc(val.how)}</div>`}
   if(val&&val.cmp&&val.cmp.length)valHtml+=`<h3>比べた売買事例（近い順）</h3>${val.cmp.map(txItemHtml).join('')}`;
-  else if(!val&&e.kind==='mansion')valHtml=`<div class="warnbox">${Object.keys(D.txindex||{}).length?(e.age===''?'築年数を入れると、近くで実際に売れたマンションと比べて割安・割高を判定できます。':'この近くで比べられる売買事例が足りないため、判定できませんでした。'):'マンションの割安・割高は、近くで実際に売れたマンションの価格と比べて判定します。国のAPIキーが設定されると使えるようになります。'}<br>参考：この場所の土地の値段は約${unit(Math.round(x.landPrice))}/㎡です。</div>`;
+  else if(!val&&e.kind==='mansion')valHtml=`<div class="warnbox">${Object.keys(D.txindex||{}).length?(e.age===''?'築年数を入れると、近くで実際に売れたマンションと比べて割安・割高を判定できます。':'この近くで比べられる売買事例が足りないため、判定できませんでした。'):'マンションの割安・割高は、近くで実際に売れたマンションの価格と比べて判定します。国の売買価格データが取り込まれると使えるようになります。'}<br>参考：この場所の土地の値段は約${unit(Math.round(x.landPrice))}/㎡です。</div>`;
   let yld='';if(e.rent&&price){const y=e.rent*1e4*12/price*100;yld=`<div class="box"><small>表面利回り（家賃×12÷価格）</small><b>${y.toFixed(2)}%</b></div>`}
   box.innerHTML=`<div class="card">
     <div class="big"><div class="grade g${r.grade}"><b>${r.grade}</b><small>${r.total}点</small></div>
@@ -437,7 +437,7 @@ function renderInfo(m){
   <div class="card"><h2>このアプリでできないこと（大事）</h2>
   <ul class="note" style="font-size:13px">
   <li>アットホーム・SUUMOの物件そのものは載せていません（各サイトの規約で、許可のない転載が禁止されているため）。各地点・評価画面のボタンから、同じ地域の売り物件を開けます。</li>
-  <li>${Object.keys(D.txindex||{}).length?'売買事例は国の不動産情報ライブラリの公開データです（住所は町丁まで。番地や物件名は公表されていません）。':'売買事例とマンションの割安判定は、国のAPIキーを設定すると毎週自動で入ります。'}</li>
+  <li>${Object.keys(D.txindex||{}).length?'売買事例は国の不動産情報ライブラリの公開データです（住所は町丁まで。番地や物件名は公表されていません）。':'売買事例とマンションの割安判定は、国の売買価格データが取り込まれると使えます。'}</li>
   <li>内水氾濫・地盤の強さ・建物の状態・管理状態は評価に入っていません。</li>
   <li>新駅・再開発の一覧は調べた時点のもので、開業時期は変わることがあります。最新の動きは上の「最新ニュース」で確認できます（毎週自動更新）。</li>
   <li>この評価は目安です。購入前には、現地・重要事項説明・ハザードマップを必ず確認してください。</li></ul></div>

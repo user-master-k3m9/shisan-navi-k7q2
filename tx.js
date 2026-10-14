@@ -1,7 +1,7 @@
 // 売買事例（国の不動産価格情報）・ニュース・更新日
 const TYPE_N={m:'中古マンション',h:'土地と建物（戸建て等）',l:'土地'};
 const TYPE_S={m:'マンション',h:'戸建て',l:'土地'};
-const TDEF={prefs:['13'],munis:[],types:['m'],pmin:'',pmax:'',amin:'',amax:'',ageMax:0,plan:'',closedOnly:false,years:2,grade:'',noFlood:false,noSlide:false,cheap:false};
+const TDEF={prefs:['13'],munis:[],types:['m'],pmin:'',pmax:'',amin:'',amax:'',ageMax:0,walk:0,plan:'',closedOnly:false,years:2,grade:'',noFlood:false,noSlide:false,cheap:false};
 let FT=Object.assign({},TDEF,LS.get('txfilter',{}));
 const TX={
   mode:'tx',files:{},res:null,news:null,PI:{},
@@ -25,7 +25,7 @@ async function loadTx(code){
   const r=await fetch('tx/'+code+'.json');if(!r.ok)return null;
   const j=await r.json();
   const ds=j.d.map(([n,la,lo,hz,lq,pi])=>({n,la,lo,hz:hz||{},lq,pi,sc:null}));
-  const recs=j.r.map((a,k)=>{const o={code,k,t:a[0],closed:a[1],D:ds[a[2]],price:a[3],area:a[4],unit:a[5],plan:a[6]||'',tfa:a[7],by:a[8],st:a[9]||'',per:a[10],far:a[11],ren:a[12]||'',rem:a[13]||'',shape:a[14]||'',road:a[15]};
+  const recs=j.r.map((a,k)=>{const o={code,k,t:a[0],closed:a[1],D:ds[a[2]],price:a[3],area:a[4],unit:a[5],plan:a[6]||'',tfa:a[7],by:a[8],st:a[9]||'',per:a[10],far:a[11],ren:a[12]||'',rem:a[13]||'',shape:a[14]||'',road:a[15],stn:a[16]||'',stm:a[17]};
     o.age=o.by&&o.per?Math.max(0,Math.floor(o.per/10)-o.by):null;return o});
   const f={code,ds,recs,model:{}};
   for(const t of ['m','h','l'])f.model[t]=fitModel(recs.filter(o=>o.t===t&&o.unit>0));
@@ -66,7 +66,7 @@ function renderTxSearch(m){
   const idx=D.txindex||{};
   if(!Object.keys(idx).length){
     m.innerHTML=modeSwitch()+`<div class="card"><h2>売買事例をさがす</h2>
-    <div class="warnbox">実際に売れたマンション・戸建て・土地の価格は、国の「不動産情報ライブラリ」のAPIキーが設定されると、毎週自動で入ります（今は準備中です）。<br>それまでは「地価地点」と「物件を評価」を使ってください。</div></div>`;return;
+    <div class="warnbox">実際に売れたマンション・戸建て・土地の価格（国の不動産情報ライブラリ）は、まだ取り込まれていません。取り込まれると、ここで検索できるようになります。<br>それまでは「地価地点」と「物件を評価」を使ってください。</div></div>`;return;
   }
   const munis=Object.entries(D.muni).filter(([c])=>FT.prefs.includes(c.slice(0,2))&&idx[c]).sort((a,b)=>a[0].localeCompare(b[0]));
   m.innerHTML=modeSwitch()+`<div class="card"><h2>売買事例をさがす</h2>
@@ -83,6 +83,8 @@ function renderTxSearch(m){
   <div class="row"><input type="number" inputmode="decimal" id="t_amin" value="${FT.amin}" placeholder="下限なし"><span style="flex:0">〜</span><input type="number" inputmode="decimal" id="t_amax" value="${FT.amax}" placeholder="上限なし"></div>
   <label class="f">築年数</label>
   <div class="chips">${[[0,'指定なし'],[5,'5年以内'],[10,'10年以内'],[20,'20年以内'],[30,'30年以内']].map(([k,n])=>`<button class="chip ${FT.ageMax==k?'on':''}" onclick="FT.ageMax=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
+  <label class="f">駅からの徒歩</label>
+  <div class="chips">${[[0,'指定なし'],[5,'5分以内'],[10,'10分以内'],[15,'15分以内']].map(([k,n])=>`<button class="chip ${FT.walk==k?'on':''}" onclick="FT.walk=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">間取り（例：2LDK、空欄なら全部）</label><input type="text" id="t_plan" value="${esc(FT.plan)}">
   <label class="f">売買の時期</label>
   <div class="chips">${[[1,'直近1年'],[2,'直近2年'],[3,'直近3年']].map(([k,n])=>`<button class="chip ${FT.years==k?'on':''}" onclick="FT.years=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
@@ -120,6 +122,7 @@ function txFilt(){
       if(o.area!=null&&(o.area<amn||o.area>amx))continue;
       if(FT.ageMax&&(o.age==null||o.age>FT.ageMax))continue;
       if(plan&&!o.plan.toUpperCase().includes(plan))continue;
+      if(FT.walk&&(o.stm==null||o.stm>FT.walk))continue;
       if(FT.closedOnly&&!o.closed)continue;
       if(FT.cheap&&!(o.ratio!=null&&o.ratio<0.9))continue;
       const sc=districtScore(o.D,c);
@@ -143,7 +146,7 @@ function txItemHtml(o){
     <div class="grade g${sc?g:'D'}"><b>${sc?g:'－'}</b><small>${sc?sc.r.total+'点':'位置不明'}</small></div>
     <div style="flex:1;min-width:0">
       <div class="t">${esc(txTitle(o))}</div>
-      <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
+      <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
       <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${sc&&sc.sd<640?`<span class="tag good">${esc(sc.st.n)}駅 近い</span>`:''}</div>
     </div></div>`;
@@ -189,7 +192,7 @@ function renderTxDetail(m){
     </div>
     <div class="note" style="margin-top:6px">相場は、同じ市区町村で直近3年に売れた同じ種類の物件から、築年数による値下がりを考えて計算しています${o.t==='l'?'（土地は同じ町丁に5件以上あればその中央値）':''}。</div></div>
   <div class="card"><h2>物件の情報</h2><dl class="kv">
-    <dt>種類</dt><dd>${TYPE_N[o.t]}</dd><dt>面積</dt><dd>${o.area??'—'}㎡${o.tfa?`（延床 ${o.tfa}㎡）`:''}</dd>
+    <dt>種類</dt><dd>${TYPE_N[o.t]}</dd>${o.stn?`<dt>最寄り駅</dt><dd>${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}</dd>`:''}<dt>面積</dt><dd>${o.area??'—'}㎡${o.tfa?`（延床 ${o.tfa}㎡）`:''}</dd>
     ${o.plan?`<dt>間取り</dt><dd>${esc(o.plan)}</dd>`:''}<dt>建築年</dt><dd>${o.by?o.by+'年':'—'}</dd>
     ${o.st?`<dt>構造</dt><dd>${esc(o.st)}</dd>`:''}${o.far?`<dt>容積率</dt><dd>${o.far}%</dd>`:''}${o.road?`<dt>前面道路</dt><dd>幅${o.road}m</dd>`:''}
     ${o.shape?`<dt>土地の形</dt><dd>${esc(o.shape)}</dd>`:''}${o.ren?`<dt>改装</dt><dd>${esc(o.ren)}</dd>`:''}${o.rem?`<dt>事情</dt><dd>${esc(o.rem)}</dd>`:''}
@@ -252,9 +255,9 @@ function newsCard(codes,limit){
 function updatedCard(){
   const mt=D.meta||{};
   return `<div class="card"><h2>データの更新日</h2><dl class="kv">
-  <dt>アプリのデータ</dt><dd>${esc(D.built)}（毎週月曜に自動で確認）</dd>
+  <dt>アプリのデータ</dt><dd>${esc(D.built)}（毎週月曜に自動で更新）</dd>
   <dt>地価</dt><dd>公示 ${mt.land?mt.land.L01:''}年・調査 ${mt.land?mt.land.L02:''}年</dd>
-  <dt>売買事例</dt><dd>${mt.tx?esc(mt.tx)+'取得（'+perTxt(qNow())+'まで）':'APIキーの設定待ち'}</dd>
+  <dt>売買事例</dt><dd>${mt.tx?esc(mt.tx)+(mt.txsrc==='CSV'?'取込':'取得')+'（'+perTxt(qNow())+'まで）':'まだ入っていません'}</dd>
   <dt>災害の想定</dt><dd>${esc(mt.hazard||'')}取得（3か月ごと）</dd>
   <dt>ニュース</dt><dd>${esc(mt.news||'')}</dd></dl></div>`;
 }

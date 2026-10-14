@@ -6,7 +6,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import openpyxl
 from common import ROOT, DATA, PREFS, load, save, dist, ckey
-import base, hazard, reinfo, news
+import base, hazard, reinfo, news, csvimport
 
 TODAY = datetime.date.today().isoformat()
 
@@ -92,6 +92,13 @@ def main():
     rr = reinfo.run(coords)
     liq = load('liq_cache.json', {})
     if rr:
+        meta['txsrc'] = 'API'
+    else:
+        rows = csvimport.load_rows()  # キーがないときは、画面からダウンロードしたCSVを使う
+        if rows:
+            rr = (rows, reinfo.locate_districts(rows), liq)
+            meta['txsrc'] = 'CSV'
+    if rr:
         rows, geo, liq = rr
         meta['tx'] = TODAY
         hazard.lookup([(v[0], v[1]) for v in geo.values() if v])  # 地区の位置の災害もまとめて判定
@@ -142,7 +149,7 @@ def main():
                     di[q] = len(dl) - 1
                 unit = r['unit'] or (round(r['price'] / r['area']) if r['area'] else None)
                 recs.append([r['t'], 1 if r['c'] == '成約' else 0, di[q], r['price'], r['area'], unit, r['plan'], r['tfa'], r['by'], r['st'],
-                             r['per'], r['far'], r['ren'], r['rem'], r['shape'], r['road']])
+                             r['per'], r['far'], r['ren'], r['rem'], r['shape'], r['road'], r.get('stn') or '', r.get('stm')])
             save('tx/%s.json' % code, dict(d=dl, r=recs), root=ROOT)
             txindex[code] = [len(recs), max((r[10] or 0) for r in recs)]
         save('txindex.json', txindex)
@@ -161,7 +168,7 @@ def main():
            '災害': '国土地理院 重ねるハザードマップ オープンデータ（%s取得）' % meta['hazard'],
            '計画': '各事業者・自治体の公表資料と報道（一覧は随時更新）'}
     if meta.get('tx'):
-        src['売買'] = '国土交通省 不動産情報ライブラリ 不動産価格（取引価格・成約価格）情報（%s取得）' % meta['tx']
+        src['売買'] = '国土交通省 不動産情報ライブラリ 不動産価格（取引価格・成約価格）情報（%s%s）' % (meta['tx'], '取得' if meta.get('txsrc') == 'API' else '取込・画面からダウンロードしたCSV')
         src['液状化'] = '国土交通省都市局 地形区分に基づく液状化の発生傾向図（不動産情報ライブラリ経由）'
     save('data.json', dict(points=out, stations=sts, muni=munis, projects=proj, built=TODAY, meta=meta, txindex=txindex, sources=src), root=ROOT)
     print('完成', len(out), '地点', os.path.getsize(os.path.join(ROOT, 'data.json')) // 1024, 'KB', flush=True)
