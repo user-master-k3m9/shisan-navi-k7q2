@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v11';
+const VER='v13';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -26,6 +26,15 @@ const dl=(k,v)=>(k==='flood'?DEPTH_F:DEPTH)[v];
 function waterCut(d,k){if(k==='flood'&&d<=3)return d>=1?9:3;return d>=5?15:d>=3?12:d>=1?8:d>=0.5?5:d>0?3:0}
 function cagr(a,b,n){return a>0&&b>0?Math.pow(b/a,1/n)-1:null}
 const W_ST={'事業中':1,'計画':0.7,'構想':0.4};
+let PJ=null;
+// 計画の完成・開業の年（「2030年代半ば」→2035、「継続」「完成」→今年、「未定」→なし）
+function projYear(q){const t=String(q.year||'');if(/継続|完成|開業済/.test(t)&&!/\d{4}/.test(t))return new Date().getFullYear();
+  const m=t.match(/(\d{4})/);if(!m)return null;let y=+m[1];if(/年代/.test(t))y+=/前半/.test(t)?2:/半ば|中頃/.test(t)?5:/後半/.test(t)?8:/以降/.test(t)?5:3;return y}
+// 一覧の札：近くの主な計画
+function pjLine(r){const p=r&&r.pj;if(!p)return'';const byY=(TX.mode==='tx'?tsort:S.sort)==='pjyear',x=byY&&p.yq?p.yq:p.top;if(!x)return'';const q=x.q;
+  return `<div class="m" style="color:var(--acc)">${q.type==='st'?'🚉':'🏗'} ${esc(q.name)}（${(x.d/1000).toFixed(1)}km・${esc(q.year)}）</div>`}
+const pjCmpV=(a,b)=>((b&&b.pj?b.pj.v:0)-(a&&a.pj?a.pj.v:0));
+const pjCmpY=(a,b)=>{const x=a&&a.pj&&a.pj.yr,y=b&&b.pj&&b.pj.yr;if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;return x-y};
 function score(f){
   const parts=[],tags=[];
   // 1 安全性 25
@@ -68,8 +77,10 @@ function score(f){
   {let n=[],v=0;
     if(f.g5!=null){v+=clamp((f.g5+0.01)/0.09,0,1)*15;n.push(`地価が5年で${f.g5>=0?'+':''}${((Math.pow(1+f.g5,5)-1)*100).toFixed(1)}%（年${(f.g5*100).toFixed(1)}%）`)}
     else{v+=6;n.push('地価の5年推移データなし')}
-    let pj=0;const near=[];
-    for(const {q,d} of f.pj||[]){const base=q.type==='st'?10:7,fd=d<800?1:d<1500?0.6:d<3000?(q.type==='st'?0.25:0.2):0;const s=base*fd*(W_ST[q.status]||0.5);if(s>0){pj+=s;near.push(`${q.name}（${(d/1000).toFixed(1)}km・${q.year}・${q.status}）`)}}
+    let pj=0,top=null,topS=0,yr=null,yq=null;const near=[];
+    for(const {q,d} of f.pj||[]){const base=q.type==='st'?10:7,fd=d<800?1:d<1500?0.6:d<3000?(q.type==='st'?0.25:0.2):0;const s=base*fd*(W_ST[q.status]||0.5);if(s>0){pj+=s;near.push(`${q.name}（${(d/1000).toFixed(1)}km・${q.year}・${q.status}）`);if(s>topS){topS=s;top={q,d}}
+      if(d<1500){const y=projYear(q);if(y&&(yr==null||y<yr)){yr=y;yq={q,d}}}}}
+    PJ={v:pj,top,yr,yq};
     v+=Math.min(10,pj);
     if(near.length)n.push(...near.slice(0,3).map(s=>'近くの計画：'+s));else n.push('3km以内に大きな新駅・再開発計画なし');
     parts.push({k:'将来性',max:25,v,n});
@@ -107,7 +118,8 @@ function score(f){
   const W={'水害・土砂':20,'地震・火災':15,'将来性':22,'人口':18,'利便性':17,'値動きの安定':8};
   for(const p of parts){const w=W[p.k];p.v=p.v/p.max*w;p.max=w}
   const total=Math.round(parts.reduce((a,p)=>a+p.v,0));
-  return {total,grade:grade(total),parts,tags};
+  const pjInfo=PJ;PJ=null;
+  return {total,grade:grade(total),parts,tags,pj:pjInfo};
 }
 function grade(t){return t>=78?'S':t>=68?'A':t>=58?'B':t>=48?'C':'D'}
 
@@ -189,7 +201,7 @@ function filt(){
 }
 function count(){return filt().length.toLocaleString()}
 function doSearch(){LS.set('filter',F);results=null;shown=40;go('list')}
-const SORTS={score:['評価が高い順',(a,b)=>b.r.total-a.r.total],cheap:['安い順',(a,b)=>a.pr-b.pr],dear:['高い順',(a,b)=>b.pr-a.pr],up:['5年の上昇率順',(a,b)=>(b.g5??-9)-(a.g5??-9)],yoy:['前年比が高い順',(a,b)=>b.yo-a.yo],walk:['駅に近い順',(a,b)=>a.sd-b.sd],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.sn,b.sn)||b.r.total-a.r.total]};
+const SORTS={score:['評価が高い順',(a,b)=>b.r.total-a.r.total],cheap:['安い順',(a,b)=>a.pr-b.pr],dear:['高い順',(a,b)=>b.pr-a.pr],up:['5年の上昇率順',(a,b)=>(b.g5??-9)-(a.g5??-9)],yoy:['前年比が高い順',(a,b)=>b.yo-a.yo],walk:['駅に近い順',(a,b)=>a.sd-b.sd],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.sn,b.sn)||b.r.total-a.r.total],pj:['再開発・新駅の効果が大きい順',(a,b)=>pjCmpV(a.r,b.r)||b.r.total-a.r.total],pjyear:['再開発・新駅の完成が早い順',(a,b)=>pjCmpY(a.r,b.r)||pjCmpV(a.r,b.r)]};
 function getResults(){if(!results){results=filt().sort(SORTS[S.sort][1])}return results}
 
 // ---------- 一覧 ----------
@@ -201,6 +213,7 @@ function itemHtml(p){
       <div class="t">${esc(p.a.replace(/^(東京都|神奈川県|埼玉県|千葉県|茨城県|栃木県|群馬県)\s*/,''))}</div>
       <div class="m">${esc(p.sn)}駅 徒歩${walkMin(p.sd)}分・${p.cat}・${p.s==='公示'?'公示2026':'調査2025'}・${esc(p.z||'')}</div>
       <div><span class="price">${unit(p.pr)}/㎡</span> <span class="m">坪${unit(Math.round(p.pr*3.30579))}・前年比${p.yo>=0?'+':''}${p.yo}%</span></div>
+      ${pjLine(p.r)}
       <div class="tags">${p.r.tags.slice(0,5).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}</div>
       ${viewLinks({lat:p.la,lon:p.lo,code:p.c,town:townOf(p.a,p.c),kind:p.cat==='住宅地'?'all':'all',small:true})}
     </div></div>`;
@@ -334,8 +347,15 @@ function togFav(i){let f=LS.get('fav',[]);f=f.includes(i)?f.filter(x=>x!==i):[..
 // ---------- 物件を評価 ----------
 function renderEval(m){
   const e=LS.get('evalForm',{kind:'mansion',addr:'',price:'',area:'',barea:'',age:'',rent:'',url:''});
-  m.innerHTML=`<div class="card"><h2>気になる物件を評価する</h2>
-  <div class="note">アットホームやSUUMOで見つけた物件の住所と価格を入れると、その場所の評価（100点満点）と、相場と比べた割安・割高を出します。</div>
+  m.innerHTML=`<div class="card"><h2>気になる物件を登録して評価</h2>
+  <div class="note">SUUMO・アットホームなどで見つけた物件を登録すると、評価（100点満点）と相場との比較を出し、「気になる物件リスト」から物件ページへ直接飛べるようにします。</div>
+  <label class="f">① 物件ページのURL</label>
+  <div class="row"><input type="url" id="e_url" value="${esc(e.url)}" placeholder="https://suumo.jp/... や https://www.athome.co.jp/..."><button class="btn sm sub" style="flex:0 0 auto" onclick="pasteTo('e_url')">貼り付け</button></div>
+  <label class="f">② 物件ページの「物件概要」の文章を貼る（任意・自動で読み取ります）</label>
+  <textarea id="e_text" rows="4" style="width:100%;font:inherit;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" placeholder="物件ページで「価格」「所在地」「専有面積」「築年月」などが書かれた部分を長押しで選んでコピーし、ここに貼ってください"></textarea>
+  <div class="row" style="margin-top:6px"><button class="btn sm sub" onclick="pasteTo('e_text')">貼り付け</button><button class="btn sm" onclick="readListing()">読み取って評価</button></div>
+  <div id="e_parse" class="note" style="margin-top:4px"></div>
+  <h3>③ 内容を確認（読み取れなかった所は手で入れてください）</h3>
   <label class="f">種類</label>
   <div class="chips">${[['mansion','中古マンション'],['house','一戸建て'],['land','土地']].map(([k,n])=>`<button class="chip ${e.kind===k?'on':''}" onclick="evKind('${k}')">${n}</button>`).join('')}</div>
   <label class="f">住所（番地まで入れると正確です）</label><input type="text" id="e_addr" value="${esc(e.addr)}" placeholder="例：川崎市中原区小杉町3丁目">
@@ -344,7 +364,8 @@ function renderEval(m){
   ${e.kind==='house'?`<label class="f">建物面積（㎡）</label><input type="number" inputmode="decimal" id="e_barea" value="${esc(e.barea)}">`:''}
   ${e.kind!=='land'?`<label class="f">築年数（年）</label><input type="number" inputmode="numeric" id="e_age" value="${esc(e.age)}">`:''}
   <label class="f">想定の家賃（月額・万円、分かれば）</label><input type="number" inputmode="decimal" id="e_rent" value="${esc(e.rent)}" placeholder="入れると利回りを計算">
-  <label class="f">物件ページのURL（メモ用・任意）</label><input type="url" id="e_url" value="${esc(e.url)}" placeholder="https://www.athome.co.jp/...">
+  <div class="row"><div><label class="f">最寄り駅（任意）</label><input type="text" id="e_stn" value="${esc(e.stn||'')}" placeholder="例：武蔵小杉"></div><div><label class="f">駅徒歩（分・任意）</label><input type="number" inputmode="numeric" id="e_walk" value="${esc(e.walk||'')}"></div></div>
+  <input type="hidden" id="e_plan" value="${esc(e.plan||'')}">
   <div style="height:12px"></div>
   <button class="btn" id="e_go" onclick="doEval()">評価する</button>
   <div id="e_msg" class="note" style="margin-top:8px"></div></div>
@@ -353,7 +374,7 @@ function renderEval(m){
   if(S.evalRes)showEval(S.evalRes);
 }
 function readForm(){const g=id=>{const el=$('#'+id);return el?el.value.trim():''};const e=LS.get('evalForm',{kind:'mansion'});
-  return {kind:e.kind,addr:g('e_addr'),price:g('e_price'),area:g('e_area'),barea:g('e_barea'),age:g('e_age'),rent:g('e_rent'),url:g('e_url')}}
+  return {kind:e.kind,addr:g('e_addr'),price:g('e_price'),area:g('e_area'),barea:g('e_barea'),age:g('e_age'),rent:g('e_rent'),url:g('e_url'),stn:g('e_stn'),walk:g('e_walk'),plan:g('e_plan')}}
 function evKind(k){const e=readForm();e.kind=k;LS.set('evalForm',e);S.evalRes=null;renderEval($('#main'))}
 async function geocode(q){
   const r=await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q='+encodeURIComponent(q));const j=await r.json();
@@ -401,7 +422,11 @@ function evaluate(e,g,hz,mc){
   const landPrice=pr/wsum,h2=h.map((v,i)=>hw[i]?v/hw[i]*landPrice:0);
   const code=mc&&D.muni[mc]?mc:nb[0][0].c,m=D.muni[code];
   const pj=D.projects.map(q=>({q,d:distM(lat,lon,q.lat,q.lon)})).filter(x=>x.d<3000).sort((a,b)=>a.d-b.d).slice(0,6);
-  const f={hz,g5:gw?g5/gw:null,h:h2,pop:m?m[2]:null,muniName:m?m[1]:'',st:st[0],walk:Math.round(st[1]*1.25),pj};
+  // 物件ページに書かれた最寄り駅・徒歩分数があればそれを使う
+  let st0=st[0],walk=Math.round(st[1]*1.25);
+  if(e.stn){const c=D.stations.filter(s=>s.n===e.stn.replace(/駅$/,'')).map(s=>[s,distM(lat,lon,s.lat,s.lon)]).filter(x=>x[1]<6000).sort((a,b)=>a[1]-b[1])[0];if(c)st0=c[0]}
+  if(e.walk)walk=(+e.walk)*80;
+  const f={hz,g5:gw?g5/gw:null,h:h2,pop:m?m[2]:null,muniName:m?m[1]:'',st:st0,walk,pj};
   const lqp=nb[0]&&nb[0][1]<1500?nb[0][0].lq:null;if(lqp)f.lq=lqp;
   f.qk=g.qk||(nb[0]&&nb[0][1]<300?nb[0][0].qk:null);f.tokyo=String(code).startsWith('13');f.fr=f.tokyo?fireAt(lat,lon):null;
   const r=score(f);
@@ -415,7 +440,7 @@ function evaluate(e,g,hz,mc){
     else if(e.kind==='house'&&barea){const land=landPrice*MARKET*area,bld=barea*22e4*Math.max(0.1,1-(age||0)/25);
       val={est:land+bld,ratio:price/(land+bld),how:`土地 ${man(land)}（地価×1.15×${area}㎡）＋建物 ${man(bld)}（木造の建て直し費用22万円/㎡を築${age||0}年で目減り）`}}
   }
-  return {e,g,hz,f,r,val,code,m,nb,landPrice,price,st:st[0],stD:st[1],date:new Date().toISOString().slice(0,10)};
+  return {e,g,hz,f,r,val,code,m,nb,landPrice,price,st:st0,stD:st[1],date:new Date().toLocaleDateString('sv-SE')};
 }
 function showEval(x){
   const {e,g,r,val,m,price}=x,box=$('#e_res');if(!box)return;
@@ -435,7 +460,7 @@ function showEval(x){
     ${yld?`<div class="boxes">${yld}</div>`:''}${bld}
     <h3>この物件を見る</h3>${e.url?`<a class="btn sm" style="margin-bottom:8px" target="_blank" rel="noopener" href="${esc(e.url)}">入力した物件ページを開く ↗</a>`:''}
     ${viewLinks({lat:g.lat,lon:g.lon,code:x.code||x.nb[0][0].c,town:townOf(g.title,x.code||x.nb[0][0].c),kind:{mansion:'m',house:'h',land:'l'}[e.kind]})}
-    <div style="height:10px"></div><button class="btn sub" onclick="saveEval()">☆ この評価を保存</button></div>
+    <div style="height:10px"></div><button class="btn" onclick="saveEval()">☆ 気になる物件リストに保存</button></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(r)}<div class="note">駅までの距離は直線距離×1.25で見積もっています。</div></div>
   <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz,x.f.lq,x.f.qk,x.f.fr,x.f.tokyo)}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(x.f.pj)}</div>
@@ -444,12 +469,20 @@ function showEval(x){
   <div class="card"><h2>近くの地価地点</h2>${x.nb.map(([p,d])=>itemHtml(p).replace('<div class="item"','<div class="item" data-d="'+Math.round(d)+'"')).join('')}</div>
   <div class="card">${linksHtml(g.lat,g.lon,x.code||x.nb[0][0].c,g.title)}</div>`;
 }
-function saveEval(){const x=S.evalRes;if(!x)return;const l=LS.get('evals',[]);l.unshift({e:x.e,title:x.g.title,grade:x.r.grade,total:x.r.total,ratio:x.val?x.val.ratio:null,date:x.date});LS.set('evals',l.slice(0,100));renderEval($('#main'))}
-function evalSavedHtml(){const l=LS.get('evals',[]);if(!l.length)return'';
-  return `<div class="card"><h2>保存した評価</h2>${l.map((v,i)=>`<div class="item" onclick="reEval(${i})"><div class="grade g${v.grade}"><b>${v.grade}</b><small>${v.total}点</small></div>
-  <div style="flex:1"><div class="t">${esc(v.title)}</div><div class="m">${({mansion:'中古マンション',house:'一戸建て',land:'土地'})[v.e.kind]}・${v.e.price?Number(v.e.price).toLocaleString()+'万円':''}${v.ratio?`・相場比${(v.ratio*100).toFixed(0)}%`:''}・${v.date}</div>
-  ${v.e.url?`<a class="m" href="${esc(v.e.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">物件ページを開く</a>`:''}</div>
-  <button class="chip" onclick="event.stopPropagation();delEval(${i})">削除</button></div>`).join('')}</div>`}
+function saveEval(){const x=S.evalRes;if(!x)return;let l=LS.get('evals',[]);
+  if(x.e.url)l=l.filter(v=>v.e.url!==x.e.url);// 同じ物件は新しい評価で置き換える
+  l.unshift({e:x.e,title:x.g.title,grade:x.r.grade,total:x.r.total,ratio:x.val?x.val.ratio:null,date:x.date,stn:x.st?x.st.n:''});LS.set('evals',l.slice(0,200));renderEval($('#main'))}
+const ESORT={score:['評価が高い順',(a,b)=>b.total-a.total],cheap:['割安な順',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>(+a.e.price||9e9)-(+b.e.price||9e9)],new:['登録が新しい順',(a,b)=>(b.date||'').localeCompare(a.date||'')],station:['駅ごと',(a,b)=>stCmp(a.stn,b.stn)]};
+function siteName(u){return /suumo/.test(u)?'SUUMO':/athome/.test(u)?'アットホーム':/homes\.co\.jp/.test(u)?"LIFULL HOME'S":/rakumachi/.test(u)?'楽待':/kenbiya/.test(u)?'健美家':/yahoo/.test(u)?'Yahoo!不動産':'物件ページ'}
+function evalSavedHtml(){const l0=LS.get('evals',[]);if(!l0.length)return'';
+  const so=LS.get('esort','score'),l=l0.map((v,i)=>[v,i]).sort((a,b)=>ESORT[so][1](a[0],b[0]));
+  return `<div class="card"><h2>気になる物件リスト（${l0.length}件）</h2>
+  <select style="margin-bottom:8px" onchange="LS.set('esort',this.value);render()">${Object.entries(ESORT).map(([k,[n]])=>`<option value="${k}" ${so===k?'selected':''}>${n}</option>`).join('')}</select>
+  ${l.map(([v,i])=>`<div class="item" style="flex-wrap:wrap" onclick="reEval(${i})"><div class="grade g${v.grade}"><b>${v.grade}</b><small>${v.total}点</small></div>
+  <div style="flex:1;min-width:0"><div class="t">${esc(v.title)}</div><div class="m">${({mansion:'中古マンション',house:'一戸建て',land:'土地'})[v.e.kind]}${v.e.plan?'・'+esc(v.e.plan):''}${v.e.area?'・'+v.e.area+'㎡':''}${v.e.age!==''&&v.e.age!=null?'・築'+v.e.age+'年':''}${v.stn?'・'+esc(v.stn)+'駅'+(v.e.walk?' 徒歩'+v.e.walk+'分':''):''}</div>
+  <div><span class="price">${v.e.price?man(v.e.price*1e4):''}</span>${v.ratio?` <span class="tag ${v.ratio<0.85?'good':v.ratio>1.15?'bad':''}">相場比${(v.ratio*100).toFixed(0)}%</span>`:''} <span class="m">${v.date}</span></div></div>
+  <div style="flex-basis:100%;display:flex;gap:8px;margin-top:8px">${v.e.url?`<a class="btn sm" style="flex:1" href="${esc(v.e.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${siteName(v.e.url)}で物件を見る ↗</a>`:'<span class="note" style="flex:1">URL未登録</span>'}
+  <button class="chip" onclick="event.stopPropagation();delEval(${i})">削除</button></div></div>`).join('')}</div>`}
 function reEval(i){const v=LS.get('evals',[])[i];LS.set('evalForm',v.e);S.evalRes=null;renderEval($('#main'));doEval()}
 function delEval(i){const l=LS.get('evals',[]);l.splice(i,1);LS.set('evals',l);renderEval($('#main'))}
 
@@ -457,7 +490,7 @@ function delEval(i){const l=LS.get('evals',[]);l.splice(i,1);LS.set('evals',l);r
 function renderFav(m){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.remove('on'));
   const f=LS.get('fav',[]),ps=P.filter(p=>f.includes(p.i));
-  m.innerHTML=`<h2>保存した地点</h2>${ps.map(itemHtml).join('')||'<div class="card">まだありません。地点の詳しい画面で「☆ 保存する」を押すとここに入ります。</div>'}${evalSavedHtml()}`;
+  m.innerHTML=`${evalSavedHtml()||'<div class="card"><h2>気になる物件リスト</h2><div class="note">まだありません。「物件を評価」でSUUMOなどの物件を登録すると、ここから物件ページへ直接飛べます。</div></div>'}<h2>保存した地点</h2>${ps.map(itemHtml).join('')||'<div class="card">まだありません。地点の詳しい画面で「☆ 保存する」を押すとここに入ります。</div>'}`;
 }
 
 // ---------- 情報 ----------
@@ -587,3 +620,32 @@ function rangeSel(idMin,idMax,vals,cmin,cmax,fmt){
   return `<div class="row"><select id="${idMin}">${opt(cmin,'下限なし')}</select><span style="flex:0">〜</span><select id="${idMax}">${opt(cmax,'上限なし')}</select></div>`;
 }
 const manFmt=v=>v>=10000?(v/10000)+'億円':v.toLocaleString()+'万円';
+
+// ---------- 物件ページの文章から読み取る（iPhoneの中だけで処理） ----------
+async function pasteTo(id){try{const t=await navigator.clipboard.readText();if(t){$('#'+id).value=t;if(id==='e_text')readListing()}}catch(e){const m=$('#e_parse');if(m)m.textContent='自動で貼り付けできませんでした。欄を長押しして「ペースト」を選んでください。'}}
+function parseListing(text,url){
+  const t=String(text||'').normalize('NFKC').replace(/\r/g,''),o={},F=(re)=>{const m=t.match(re);return m?m:null};
+  // 価格（1億2000万円 など）
+  let m=F(/(?:価格|販売価格|売買価格)[^\d\n]{0,12}(?:(\d+)億)?\s*([\d,]+)?\s*(?:万円|万)/)||F(/(?:^|\n)\s*(?:(\d+)億)?\s*([\d,]+)\s*万円/);
+  if(m){const v=(+(m[1]||0))*10000+(+(String(m[2]||'0').replace(/,/g,'')));if(v)o.price=String(v)}
+  m=F(/(?:所在地|住所)[\s:：]*\n?\s*([^\n]+)/);if(m)o.addr=m[1].replace(/\[.*?\]|地図を見る|周辺環境|（.*?）|\(.*?\)/g,'').trim();
+  m=F(/専有面積[^\d\n]{0,12}([\d.]+)\s*(?:m2|㎡|m²|平米)/);if(m){o.area=m[1];o.kind='mansion'}
+  const la=F(/土地面積[^\d\n]{0,12}([\d.]+)\s*(?:m2|㎡|m²|平米)/),ba=F(/建物面積[^\d\n]{0,12}([\d.]+)\s*(?:m2|㎡|m²|平米)/);
+  if(!o.kind&&la){o.area=la[1];o.kind=ba?'house':'land';if(ba)o.barea=ba[1]}
+  m=F(/(?:築年月|完成時期|建築年月|築年数)[^\d\n]{0,12}(\d{4})\s*年/)||F(/(\d{4})\s*年\s*\d{1,2}\s*月\s*築/);
+  if(m)o.age=String(Math.max(0,new Date().getFullYear()-(+m[1])));else{m=F(/築\s*(\d+)\s*年/);if(m)o.age=m[1]}
+  m=F(/間取り[\s:：]*\n?\s*(ワンルーム|\d+\s*[SLDKR+]+[SLDKR+\d]*)/);if(m)o.plan=m[1].replace(/\s/g,'');
+  m=F(/[「『]([^」』\n]{1,20})[」』]\s*(?:駅)?\s*(?:徒歩|歩)\s*(\d+)\s*分/)||F(/([^\s、,/]{1,15})駅\s*(?:徒歩|歩)\s*(\d+)\s*分/);
+  if(m){o.stn=m[1].replace(/駅$/,'');o.walk=m[2]}
+  if(!o.kind&&url){if(/ms\/chuko|mansion/.test(url))o.kind='mansion';else if(/ikkodate|kodate/.test(url))o.kind='house';else if(/tochi/.test(url))o.kind='land'}
+  return o;
+}
+function readListing(){
+  const e=readForm(),o=parseListing($('#e_text').value,e.url),names={price:'価格',addr:'所在地',area:'面積',barea:'建物面積',age:'築年数',plan:'間取り',stn:'駅',walk:'徒歩',kind:'種類'};
+  const got=Object.keys(o);
+  if(!got.length){$('#e_parse').textContent='読み取れませんでした。「価格」「所在地」などが書かれた部分をコピーして貼ってください。';return}
+  Object.assign(e,o);LS.set('evalForm',e);S.evalRes=null;renderEval($('#main'));
+  const miss=['price','addr','area'].filter(k=>!o[k]).map(k=>names[k]);
+  $('#e_parse').textContent='読み取りました：'+got.map(k=>names[k]).join('・')+(miss.length?`（${miss.join('・')}は読み取れなかったので入れてください）`:'');
+  if(!miss.length)doEval();
+}

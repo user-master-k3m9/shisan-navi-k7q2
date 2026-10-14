@@ -114,7 +114,7 @@ function renderTxSearch(m){
   <label class="f">場所の総合評価</label>
   <div class="chips">${[['','指定なし'],['S','Sのみ'],['A','A以上'],['B','B以上'],['C','C以上']].map(([k,n])=>`<button class="chip ${FT.grade===k?'on':''}" onclick="FT.grade='${k}';renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">こだわり条件</label>
-  ${[['cheap','相場より割安（相場の90%未満）'],['closedOnly','成約価格のみ（不動産会社経由で成約した価格）'],['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['noLiq','液状化しやすい地形を除く'],['noFire','火災危険度3以上を除く（東京都）']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${FT[k]?'checked':''} onchange="FT.${k}=this.checked">${n}</label>`).join('')}
+  ${[['cheap','相場より割安（相場の90%未満）'],['closedOnly','成約価格のみ（不動産会社経由で成約した価格）'],['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['noLiq','液状化しやすい地形を除く'],['noFire','火災危険度3以上を除く（東京都）'],['proj','新駅・延伸・再開発まで1.5km以内']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${FT[k]?'checked':''} onchange="FT.${k}=this.checked">${n}</label>`).join('')}
   <div style="height:12px"></div>
   <button class="btn" id="t_go" onclick="doTxSearch()">この条件で検索</button>
   <div id="t_msg" class="note" style="margin-top:6px"></div>
@@ -156,11 +156,12 @@ function txFilt(){
       if(FT.noSlide&&(o.D.hz.debris||o.D.hz.slope||o.D.hz.slide))continue;
       if(FT.noLiq&&o.D.qk&&liqLand(o.D.qk[3]))continue;
       if(FT.noFire&&o.D.fr&&o.D.fr[1]>=3)continue;
+      if(FT.proj&&!(sc&&sc.f.pj.some(x=>x.d<1500)))continue;
       out.push(o);
     }}
   return out;
 }
-const TSORT={score:['場所の評価が高い順',(a,b)=>((b.D.sc&&b.D.sc.r.total)||0)-((a.D.sc&&a.D.sc.r.total)||0)],cheap:['割安な順（相場比）',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>a.price-b.price],dear:['高い順',(a,b)=>b.price-a.price],unit:['㎡単価が安い順',(a,b)=>(a.unit||9e9)-(b.unit||9e9)],new:['新しい順',(a,b)=>(b.per||0)-(a.per||0)],area:['広い順',(a,b)=>(b.area||0)-(a.area||0)],walk:['駅に近い順',(a,b)=>(a.stm??99)-(b.stm??99)],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.stn,b.stn)||(a.stm??99)-(b.stm??99)]};
+const TSORT={score:['場所の評価が高い順',(a,b)=>((b.D.sc&&b.D.sc.r.total)||0)-((a.D.sc&&a.D.sc.r.total)||0)],cheap:['割安な順（相場比）',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>a.price-b.price],dear:['高い順',(a,b)=>b.price-a.price],unit:['㎡単価が安い順',(a,b)=>(a.unit||9e9)-(b.unit||9e9)],new:['新しい順',(a,b)=>(b.per||0)-(a.per||0)],area:['広い順',(a,b)=>(b.area||0)-(a.area||0)],walk:['駅に近い順',(a,b)=>(a.stm??99)-(b.stm??99)],station:['駅ごと（利用者の多い駅から）',(a,b)=>stCmp(a.stn,b.stn)||(a.stm??99)-(b.stm??99)],pj:['再開発・新駅の効果が大きい順',(a,b)=>pjCmpV(a.D.sc&&a.D.sc.r,b.D.sc&&b.D.sc.r)],pjyear:['再開発・新駅の完成が早い順',(a,b)=>pjCmpY(a.D.sc&&a.D.sc.r,b.D.sc&&b.D.sc.r)||pjCmpV(a.D.sc&&a.D.sc.r,b.D.sc&&b.D.sc.r)]};
 let tsort=LS.get('tsort','score');
 function getTx(){if(!TX.res)TX.res=txFilt().sort(TSORT[tsort][1]);return TX.res}
 
@@ -178,6 +179,7 @@ function txItemHtml(o){
       <div class="t">${esc(txTitle(o))}</div>
       <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
+      ${sc?pjLine(sc.r):''}
       <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${bldTags(o).map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')}${hz.slice(0,3).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}${o.stm!=null&&o.stm<=7?`<span class="tag good">駅徒歩${o.stm}分</span>`:''}</div>
       ${o.D.la!=null?viewLinks({lat:o.D.la,lon:o.D.lo,code:o.code,town:o.D.n,kind:o.t,small:true}):''}
     </div></div>`;
