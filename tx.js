@@ -99,15 +99,16 @@ function renderTxSearch(m){
   <div class="chips">${PREFS.map(([c,n])=>`<button class="chip ${FT.prefs.includes(c)?'on':''}" onclick="togTP('${c}')">${n}</button>`).join('')}</div>
   <label class="f">市区町村（1つ以上選ぶ・最大20）</label>
   <div class="muni">${munis.map(([c,v])=>`<label><input type="checkbox" ${FT.munis.includes(c)?'checked':''} onchange="togTM('${c}',this.checked)">${esc(v[1])}<span class="note">${idx[c][0]}</span></label>`).join('')}</div>
-  <label class="f">価格（万円）</label>
-  <div class="row"><input type="number" inputmode="decimal" id="t_pmin" value="${FT.pmin}" placeholder="下限なし"><span style="flex:0">〜</span><input type="number" inputmode="decimal" id="t_pmax" value="${FT.pmax}" placeholder="上限なし"></div>
-  <label class="f">面積（㎡）</label>
-  <div class="row"><input type="number" inputmode="decimal" id="t_amin" value="${FT.amin}" placeholder="下限なし"><span style="flex:0">〜</span><input type="number" inputmode="decimal" id="t_amax" value="${FT.amax}" placeholder="上限なし"></div>
+  <label class="f">価格</label>
+  ${rangeSel('t_pmin','t_pmax',[300,500,800,1000,1500,2000,2500,3000,3500,4000,4500,5000,5500,6000,6500,7000,7500,8000,9000,10000,12000,15000,20000,30000,50000],FT.pmin,FT.pmax,manFmt)}
+  <label class="f">面積</label>
+  ${rangeSel('t_amin','t_amax',[20,25,30,40,50,60,70,80,90,100,120,150,200,300,500],FT.amin,FT.amax,v=>v+'㎡')}
   <label class="f">築年数</label>
   <div class="chips">${[[0,'指定なし'],[5,'5年以内'],[10,'10年以内'],[20,'20年以内'],[30,'30年以内']].map(([k,n])=>`<button class="chip ${FT.ageMax==k?'on':''}" onclick="FT.ageMax=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">駅からの徒歩</label>
   <div class="chips">${[[0,'指定なし'],[5,'5分以内'],[10,'10分以内'],[15,'15分以内']].map(([k,n])=>`<button class="chip ${FT.walk==k?'on':''}" onclick="FT.walk=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
-  <label class="f">間取り（例：2LDK、空欄なら全部）</label><input type="text" id="t_plan" value="${esc(FT.plan)}">
+  <label class="f">間取り（いくつでも選べます）</label>
+  <div class="chips">${PLANS.map(([k])=>`<button class="chip ${(FT.plans||[]).includes(k)?'on':''}" onclick="togPlan('${k}')">${k}</button>`).join('')}</div>
   <label class="f">売買の時期</label>
   <div class="chips">${[[1,'直近1年'],[2,'直近2年'],[3,'直近3年']].map(([k,n])=>`<button class="chip ${FT.years==k?'on':''}" onclick="FT.years=${k};renderTxSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">場所の総合評価</label>
@@ -119,7 +120,8 @@ function renderTxSearch(m){
   <div id="t_msg" class="note" style="margin-top:6px"></div>
   <div style="height:8px"></div>
   <button class="btn sub" onclick="FT=Object.assign({},TDEF);LS.set('txfilter',FT);renderTxSearch($('#main'))">条件をリセット</button></div>`+updateBox();
-  ['pmin','pmax','amin','amax','plan'].forEach(k=>$('#t_'+k).addEventListener('input',e=>{FT[k]=e.target.value}));
+  ['pmin','pmax','amin','amax'].forEach(k=>$('#t_'+k).addEventListener('change',e=>{FT[k]=e.target.value}));
+
 }
 function togT(k){FT.types=FT.types.includes(k)?FT.types.filter(x=>x!==k):[...FT.types,k];if(!FT.types.length)FT.types=[k];renderTxSearch($('#main'))}
 function togTP(c){FT.prefs=FT.prefs.includes(c)?FT.prefs.filter(x=>x!==c):[...FT.prefs,c];FT.munis=FT.munis.filter(x=>FT.prefs.includes(x.slice(0,2)));renderTxSearch($('#main'))}
@@ -134,7 +136,8 @@ async function doTxSearch(){
 }
 function txFilt(){
   const lim=(Math.floor(qNow()/10)-FT.years)*10+qNow()%10;
-  const pmn=FT.pmin?FT.pmin*1e4:0,pmx=FT.pmax?FT.pmax*1e4:Infinity,amn=+FT.amin||0,amx=+FT.amax||Infinity,plan=FT.plan.trim().toUpperCase();
+  const plans=(FT.plans||[]).map(k=>PLANS.find(p=>p[0]===k)[1]);
+  const pmn=FT.pmin?FT.pmin*1e4:0,pmx=FT.pmax?FT.pmax*1e4:Infinity,amn=+FT.amin||0,amx=+FT.amax||Infinity;
   const out=[];
   for(const c of FT.munis){const f=TX.files[c];if(!f)continue;
     for(const o of f.recs){
@@ -143,7 +146,7 @@ function txFilt(){
       if(o.price<pmn||o.price>pmx)continue;
       if(o.area!=null&&(o.area<amn||o.area>amx))continue;
       if(FT.ageMax&&(o.age==null||o.age>FT.ageMax))continue;
-      if(plan&&!o.plan.toUpperCase().includes(plan))continue;
+      if(plans.length&&!plans.some(re=>re.test(o.plan)))continue;
       if(FT.walk&&(o.stm==null||o.stm>FT.walk))continue;
       if(FT.closedOnly&&!o.closed)continue;
       if(FT.cheap&&!(o.ratio!=null&&o.ratio<0.9))continue;
@@ -411,3 +414,7 @@ function autoUpdate(){
   setTimeout(()=>{fetch(NTFY+TOPIC,{method:'POST',body:'update'}).then(()=>show('Macに合図を送りました。返事を待っています…')).catch(()=>{show('合図を送れませんでした。電波の良い所でもう一度押してください。');end()})},1200);
   setTimeout(()=>{if(!started){show('Macから返事がありません。Macの電源が切れているか、スリープ中です。Macを開いてからもう一度押すか、下の「Macが使えないとき」から手動で取り込んでください。');end()}},45000);
 }
+
+// 間取り（SUUMOと同じ分け方）
+const PLANS=[['ワンルーム',/^1R/],['1K',/^1K/],['1DK',/^1DK/],['1LDK',/^1LDK/],['2K',/^2K/],['2DK',/^2DK/],['2LDK',/^2LDK/],['3K',/^3K/],['3DK',/^3DK/],['3LDK',/^3LDK/],['4K以上',/^([4-9]|\d\d)/]];
+function togPlan(k){const a=FT.plans||[];FT.plans=a.includes(k)?a.filter(x=>x!==k):[...a,k];renderTxSearch($('#main'))}

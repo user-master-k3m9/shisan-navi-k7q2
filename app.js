@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v10';
+const VER='v11';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -146,8 +146,8 @@ function renderSearch(m){
     <input type="text" id="q" value="${esc(F.q)}" placeholder="例：武蔵小杉、世田谷区、半蔵門">
     <label class="f">種類</label>
     <div class="chips">${[['all','すべて'],['住宅地','住宅地'],['商業地','商業地']].map(([k,n])=>`<button class="chip ${F.use===k?'on':''}" onclick="F.use='${k}';renderSearch($('#main'))">${n}</button>`).join('')}</div>
-    <label class="f">土地の値段（1㎡あたり・万円）</label>
-    <div class="row"><input type="number" id="pmin" inputmode="decimal" value="${F.pmin}" placeholder="下限なし"><span style="flex:0">〜</span><input type="number" id="pmax" inputmode="decimal" value="${F.pmax}" placeholder="上限なし"></div>
+    <label class="f">土地の値段（1㎡あたり）</label>
+    ${rangeSel('pmin','pmax',[3,5,10,15,20,30,40,50,70,100,150,200,300,500,1000],F.pmin,F.pmax,v=>v+'万円')}
     <div class="note">参考：1坪＝約3.3㎡。土地100㎡の総額は「1㎡の値段×100」。</div>
     <label class="f">駅からの徒歩</label>
     <div class="chips">${[[0,'指定なし'],[5,'5分以内'],[10,'10分以内'],[15,'15分以内'],[20,'20分以内']].map(([k,n])=>`<button class="chip ${F.walk==k?'on':''}" onclick="F.walk=${k};renderSearch($('#main'))">${n}</button>`).join('')}</div>
@@ -160,7 +160,8 @@ function renderSearch(m){
     <div style="height:8px"></div>
     <button class="btn sub" onclick="F=Object.assign({},DEF);LS.set('filter',F);renderSearch($('#main'))">条件をリセット</button>
   </div>`;
-  ['q','pmin','pmax'].forEach(id=>$('#'+id).addEventListener('input',e=>{F[id]=e.target.value;$('#cnt').textContent=count()}));
+  $('#q').addEventListener('input',e=>{F.q=e.target.value;$('#cnt').textContent=count()});
+  ['pmin','pmax'].forEach(id=>$('#'+id).addEventListener('change',e=>{F[id]=e.target.value;$('#cnt').textContent=count()}));
   m.querySelectorAll('input[type=checkbox]').forEach(e=>e.addEventListener('change',()=>{$('#cnt').textContent=count()}));
 }
 function togPref(c){F.prefs=F.prefs.includes(c)?F.prefs.filter(x=>x!==c):[...F.prefs,c];F.munis=F.munis.filter(x=>F.prefs.includes(x.slice(0,2)));renderSearch($('#main'))}
@@ -579,3 +580,10 @@ function viewLinks({lat,lon,code,town,kind,small}){
   if(small)return `<div class="chips" style="margin-top:6px">${a(sv,'ストリートビュー')}${a(suumoTown(ts[0],code,town),(town?esc(town)+'の':'この町の')+(ts.length>1?'売り物件':BS[ts[0]][1]))}</div>`;
   return `<div class="links">${a(sv,'ストリートビュー（現地の写真）')}${a(gm,'Googleマップ（場所）')}${ts.map(t=>a(suumoTown(t,code,town),`${town?esc(town)+'の':''}${BS[t][1]}（SUUMO）`)).join('')}</div>`;
 }
+
+// 下限・上限を一覧から選ぶ（SUUMOのような選び方。iPhoneでは回転式の選択が出る）
+function rangeSel(idMin,idMax,vals,cmin,cmax,fmt){
+  const opt=(cur,none)=>`<option value="">${none}</option>`+(cur!==''&&cur!=null&&!vals.map(String).includes(String(cur))?[+cur].concat(vals).sort((a,b)=>a-b):vals).map(v=>`<option value="${v}" ${String(cur)===String(v)?'selected':''}>${fmt(v)}</option>`).join('');
+  return `<div class="row"><select id="${idMin}">${opt(cmin,'下限なし')}</select><span style="flex:0">〜</span><select id="${idMax}">${opt(cmax,'上限なし')}</select></div>`;
+}
+const manFmt=v=>v>=10000?(v/10000)+'億円':v.toLocaleString()+'万円';
