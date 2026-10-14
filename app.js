@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v1';
+const VER='v2';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -16,6 +16,7 @@ const walkMin=m=>Math.max(1,Math.ceil(m/80));
 
 // ---------- 評価のしくみ ----------
 const DEPTH={0.3:'0.3m未満',0.5:'0.3〜0.5m',1:'0.5〜1m',3:'1〜3m',5:'3〜5m',10:'5〜10m',20:'10〜20m',30:'20m以上'};
+function liqCut(lq){const t=String(lq[1]||'');if(/しにくい|対象外|なし/.test(t))return 0;if(/非常に|極めて|きわめて|特に/.test(t))return 8;if(/やや/.test(t))return 3;if(/しやすい/.test(t))return 6;return 0}
 const HZN={flood:'洪水（想定最大）',surge:'高潮',tsunami:'津波',debris:'土石流',slope:'がけ崩れ（急傾斜地）',slide:'地すべり'};
 // 洪水タイルは6段階の凡例（0.5m未満／0.5〜3m／3〜5m…）、高潮・津波は8段階
 const DEPTH_F={0.3:'0.5m未満',0.5:'0.5m未満',1:'0.5〜3m',3:'0.5〜3m',5:'3〜5m',10:'5〜10m',20:'10〜20m',30:'20m以上'};
@@ -34,8 +35,10 @@ function score(f){
     w.sort((a,b)=>b-a);cut+=(w[0]||0)+(w.slice(1).reduce((a,b)=>a+b,0))*0.4;
     const ls=Math.max(hz.debris||0,hz.slope||0,hz.slide||0);
     if(ls){cut+=ls===2?20:10;n.push(ls===2?'土砂災害特別警戒区域（レッドゾーン）':'土砂災害警戒区域（イエローゾーン）')}
+    if(f.lq){const lc=liqCut(f.lq);if(lc){cut+=lc;n.push('液状化：'+f.lq[1]);tags.push(['液状化'+(lc>=6?'しやすい':'ややしやすい'),lc>=6?'bad':'warn'])}}
     const v=clamp(25-cut,0,25);
     if(!n.length)n.push('洪水・高潮・津波・土砂災害の想定区域に入っていない');
+    if(f.lq&&!liqCut(f.lq))n.push('液状化：'+f.lq[1]);
     parts.push({k:'安全性',max:25,v,n});
     if(hz.flood||hz.surge||hz.tsunami){const [k,d]=[['flood',hz.flood||0],['surge',hz.surge||0],['tsunami',hz.tsunami||0]].sort((a,b)=>waterCut(b[1],b[0])-waterCut(a[1],a[0]))[0];tags.push([`浸水${dl(k,d)}`,waterCut(d,k)>=9?'bad':'warn'])}else tags.push(['浸水想定なし','good']);
     if(ls)tags.push([ls===2?'土砂レッド':'土砂イエロー','bad']);
@@ -88,7 +91,7 @@ function prep(){
   P=D.points.map(p=>{
     const st=p.si>=0?D.stations[p.si]:null,m=D.muni[p.c];
     const h=p.h,g5=h[5]>0&&h[10]>0?cagr(h[5],h[10],5):null;
-    const f={hz:p.hz,g5,h,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:p.sd,pj:p.pj.map(([j,d])=>({q:D.projects[j],d}))};
+    const f={hz:p.hz,lq:p.lq,g5,h,pop:m?m[2]:null,muniName:m?m[1]:'',st,walk:p.sd,pj:p.pj.map(([j,d])=>({q:D.projects[j],d}))};
     const r=score(f);
     const z=p.z||'';const cat=/商業|近商/.test(z)||(!/住宅/.test(p.u))?'商業地':'住宅地';
     return Object.assign(p,{f,r,st,m,g5,cat,pref:p.c.slice(0,2),txt:(p.a+' '+p.sn+' '+(m?m[1]:'')).toLowerCase()});
@@ -99,16 +102,17 @@ function prep(){
 function go(t){S.tab=t;S.detail=null;document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));render();window.scrollTo(0,0)}
 function render(){
   const m=$('#main');
-  if(S.detail!=null)return renderDetail(m);
+  if(S.detail!=null)return (typeof S.detail==='string'?renderTxDetail:renderDetail)(m);
+  if(TX.mode==='tx'&&['search','list','map'].includes(S.tab))return ({search:renderTxSearch,list:renderTxList,map:renderTxMap})[S.tab](m);
   ({search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav})[S.tab](m);
 }
 
 // ---------- さがす ----------
 function renderSearch(m){
   const munis=Object.entries(D.muni).filter(([c])=>F.prefs.includes(c.slice(0,2))&&P.some(p=>p.c===c)).sort((a,b)=>a[0].localeCompare(b[0]));
-  m.innerHTML=`
+  m.innerHTML=modeSwitch()+`
   <div class="card">
-    <h2>条件を決めてさがす</h2>
+    <h2>地価地点をさがす</h2>
     <div class="note">関東の地価公示・地価調査の全地点（${P.length.toLocaleString()}か所）を、災害・将来性・人口・利便性・値動きで100点満点で評価しています。</div>
     <label class="f">都県</label>
     <div class="chips">${PREFS.map(([c,n])=>`<button class="chip ${F.prefs.includes(c)?'on':''}" onclick="togPref('${c}')">${n}</button>`).join('')}</div>
@@ -226,11 +230,12 @@ function lineChart(vals,labels,fmt){
   <path d="${d}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${xs.map(([i,v])=>`<circle cx="${X(i)}" cy="${Y(v)}" r="2.5" fill="var(--acc)"/>`).join('')}
   ${labels.map((l,i)=>l?`<text x="${X(i)}" y="${h-6}" text-anchor="middle">${l}</text>`:'').join('')}</svg>`;
 }
-function hazardTable(hz){
+function hazardTable(hz,lq){
   return `<table class="t">${Object.entries(HZN).map(([k,n])=>{const v=hz[k];let t='想定区域外',c='good';
     if(v){if(['debris','slope','slide'].includes(k)){t=v===2?'特別警戒区域（レッド）':'警戒区域（イエロー）';c='bad'}else{t=dl(k,v)+'の浸水';c=waterCut(v,k)>=9?'bad':'warn'}}
     return `<tr><td>${n}</td><td><span class="tag ${c}">${t}</span></td></tr>`}).join('')}</table>
-    <div class="note">液状化・内水氾濫（下水があふれる浸水）は含みません。リンク先の重ねるハザードマップで確認してください。</div>`;
+    ${lq?`<table class="t"><tr><td>液状化</td><td><span class="tag ${liqCut(lq)>=6?'bad':liqCut(lq)?'warn':'good'}">${esc(lq[1]||'')}</span></td></tr></table>`:''}
+    <div class="note">${lq?'':'液状化・'}内水氾濫（下水があふれる浸水）は含みません。リンク先の重ねるハザードマップで確認してください。</div>`;
 }
 function popHtml(m){
   if(!m)return'<div class="note">データなし</div>';
@@ -281,9 +286,10 @@ function renderDetail(m){
   </div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(p.r)}</div>
   <div class="card"><h2>地価の推移（1㎡あたり）</h2>${lineChart(h,h.map((_,i)=>i%2===0?String(yr-10+i).slice(2)+'年':''),v=>(v/1e4).toFixed(v>=1e5?0:1)+'万')}</div>
-  <div class="card"><h2>災害リスク</h2>${hazardTable(p.hz)}</div>
+  <div class="card"><h2>災害リスク</h2>${hazardTable(p.hz,p.lq)}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(p.f.pj)}</div>
   <div class="card"><h2>将来の人口</h2>${popHtml(p.m)}</div>
+  ${newsCard([p.c])}
   <div class="card"><h2>土地の条件</h2><dl class="kv">
     <dt>最寄り駅</dt><dd>${esc(p.sn)}駅 ${p.sd?p.sd.toLocaleString()+'m':''}${p.st?`（${esc(p.st.l)}）`:''}</dd>
     <dt>用途地域</dt><dd>${esc(p.z)}</dd><dt>建ぺい率／容積率</dt><dd>${p.bcr}%／${p.far}%</dd>
@@ -343,6 +349,9 @@ async function doEval(){
   try{
     const g=await geocode(e.addr);
     const [hz,mc]=await Promise.all([hazardAt(g.lat,g.lon),muniCode(g.lat,g.lon)]);
+    const code0=mc&&D.muni[mc]?mc:nearest(g.lat,g.lon,1)[0][0].c;
+    msg.textContent='近くで実際に売れた価格を読み込んでいます…';
+    await loadTx(code0).catch(()=>null);
     const res=evaluate(e,g,hz,mc);S.evalRes=res;msg.textContent='';showEval(res);
   }catch(err){msg.textContent=err.message||'通信できませんでした。電波の良い所でもう一度試してください。'}
   $('#e_go').disabled=false;
@@ -360,11 +369,14 @@ function evaluate(e,g,hz,mc){
   const code=mc&&D.muni[mc]?mc:nb[0][0].c,m=D.muni[code];
   const pj=D.projects.map(q=>({q,d:distM(lat,lon,q.lat,q.lon)})).filter(x=>x.d<3000).sort((a,b)=>a.d-b.d).slice(0,6);
   const f={hz,g5:gw?g5/gw:null,h:h2,pop:m?m[2]:null,muniName:m?m[1]:'',st:st[0],walk:Math.round(st[1]*1.25),pj};
+  const lqp=nb[0]&&nb[0][1]<1500?nb[0][0].lq:null;if(lqp)f.lq=lqp;
   const r=score(f);
   // 割安度
   const price=+e.price*1e4,area=+e.area,barea=+e.barea,age=+e.age;let val=null;
   const MARKET=1.15;// 公示地価→実際の売買価格のおおよその補正（関東・近年）
-  if(price&&area){
+  const cmp=txCompare(e,lat,lon,code);
+  if(price&&area&&cmp&&cmp.est){val={est:cmp.est,ratio:price/cmp.est,how:cmp.how,cmp:cmp.list}}
+  else if(price&&area){
     if(e.kind==='land'){const est=landPrice*MARKET*area;val={est,ratio:price/est,how:`近くの地価 ${unit(Math.round(landPrice))}/㎡ ×補正1.15 × ${area}㎡`}}
     else if(e.kind==='house'&&barea){const land=landPrice*MARKET*area,bld=barea*22e4*Math.max(0.1,1-(age||0)/25);
       val={est:land+bld,ratio:price/(land+bld),how:`土地 ${man(land)}（地価×1.15×${area}㎡）＋建物 ${man(bld)}（木造の建て直し費用22万円/㎡を築${age||0}年で目減り）`}}
@@ -377,7 +389,8 @@ function showEval(x){
   if(val){const p=val.ratio,j=p<0.85?['割安','good']:p<=1.15?['相場並み','']:['割高','bad'];
     valHtml=`<div class="boxes"><div class="box"><small>相場から見た目安</small><b>${man(val.est)}</b></div><div class="box"><small>売り出し価格</small><b>${man(price)}</b></div>
     <div class="box"><small>判定</small><b><span class="tag ${j[1]}" style="font-size:15px">${j[0]}</span> ${(p*100).toFixed(0)}%</b></div></div><div class="note">計算：${esc(val.how)}</div>`}
-  else if(e.kind==='mansion')valHtml=`<div class="warnbox">マンションの割安・割高は、近くで実際に売れたマンションの価格と比べる必要があります。国の成約価格データ（APIキーが届いたら追加）で判定できるようにします。今は場所の評価だけを出しています。<br>参考：この場所の土地の値段は約${unit(Math.round(x.landPrice))}/㎡です。</div>`;
+  if(val&&val.cmp&&val.cmp.length)valHtml+=`<h3>比べた売買事例（近い順）</h3>${val.cmp.map(txItemHtml).join('')}`;
+  else if(!val&&e.kind==='mansion')valHtml=`<div class="warnbox">${Object.keys(D.txindex||{}).length?(e.age===''?'築年数を入れると、近くで実際に売れたマンションと比べて割安・割高を判定できます。':'この近くで比べられる売買事例が足りないため、判定できませんでした。'):'マンションの割安・割高は、近くで実際に売れたマンションの価格と比べて判定します。国のAPIキーが設定されると使えるようになります。'}<br>参考：この場所の土地の値段は約${unit(Math.round(x.landPrice))}/㎡です。</div>`;
   let yld='';if(e.rent&&price){const y=e.rent*1e4*12/price*100;yld=`<div class="box"><small>表面利回り（家賃×12÷価格）</small><b>${y.toFixed(2)}%</b></div>`}
   box.innerHTML=`<div class="card">
     <div class="big"><div class="grade g${r.grade}"><b>${r.grade}</b><small>${r.total}点</small></div>
@@ -387,9 +400,10 @@ function showEval(x){
     ${yld?`<div class="boxes">${yld}</div>`:''}
     <div style="height:10px"></div><button class="btn sub" onclick="saveEval()">☆ この評価を保存</button></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(r)}<div class="note">駅までの距離は直線距離×1.25で見積もっています。</div></div>
-  <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz)}</div>
+  <div class="card"><h2>災害リスク（この住所の位置）</h2>${hazardTable(x.hz,x.f.lq)}</div>
   <div class="card"><h2>新駅・延伸・再開発（3km以内）</h2>${projList(x.f.pj)}</div>
   <div class="card"><h2>将来の人口</h2>${popHtml(m)}</div>
+  ${newsCard([x.code])}
   <div class="card"><h2>近くの地価地点</h2>${x.nb.map(([p,d])=>itemHtml(p).replace('<div class="item"','<div class="item" data-d="'+Math.round(d)+'"')).join('')}</div>
   <div class="card">${linksHtml(g.lat,g.lon,x.code||x.nb[0][0].c,g.title)}</div>`;
 }
@@ -411,10 +425,10 @@ function renderFav(m){
 
 // ---------- 情報 ----------
 function renderInfo(m){
-  m.innerHTML=`<div class="card"><h2>評価のしかた（100点満点）</h2>
+  m.innerHTML=updatedCard()+newsCard(null,30)+`<div class="card"><h2>評価のしかた（100点満点）</h2>
   <table class="t">
   <tr><th>項目</th><th>点</th><th>見ていること</th></tr>
-  <tr><td>安全性</td><td>25</td><td>洪水・高潮・津波の浸水の深さ、土砂災害の警戒区域。深いほど・レッドゾーンほど減点</td></tr>
+  <tr><td>安全性</td><td>25</td><td>洪水・高潮・津波の浸水の深さ、土砂災害の警戒区域、液状化のしやすさ（データがある場合）。深いほど・レッドゾーンほど減点</td></tr>
   <tr><td>将来性</td><td>25</td><td>地価の5年の上がり方（15点）＋近くの新駅・延伸・再開発（10点。事業中＞計画＞構想、近いほど高い）</td></tr>
   <tr><td>人口</td><td>20</td><td>市区町村の2035年の人口予測（14点）＋最寄り駅の乗降客数の回復・増加（6点）</td></tr>
   <tr><td>利便性</td><td>20</td><td>駅からの距離（10点）＋駅の乗降客数の多さ（10点）</td></tr>
@@ -423,9 +437,9 @@ function renderInfo(m){
   <div class="card"><h2>このアプリでできないこと（大事）</h2>
   <ul class="note" style="font-size:13px">
   <li>アットホーム・SUUMOの物件そのものは載せていません（各サイトの規約で、許可のない転載が禁止されているため）。各地点・評価画面のボタンから、同じ地域の売り物件を開けます。</li>
-  <li>マンションの割安・割高の判定は、国の成約価格データ（APIキーが必要）が入ってから使えます。</li>
-  <li>液状化・内水氾濫・地盤の強さ・建物の状態・管理状態は評価に入っていません。</li>
-  <li>新駅・再開発の一覧は2026年10月時点で私が調べたもので、開業時期は変わることがあります。</li>
+  <li>${Object.keys(D.txindex||{}).length?'売買事例は国の不動産情報ライブラリの公開データです（住所は町丁まで。番地や物件名は公表されていません）。':'売買事例とマンションの割安判定は、国のAPIキーを設定すると毎週自動で入ります。'}</li>
+  <li>内水氾濫・地盤の強さ・建物の状態・管理状態は評価に入っていません。</li>
+  <li>新駅・再開発の一覧は調べた時点のもので、開業時期は変わることがあります。最新の動きは上の「最新ニュース」で確認できます（毎週自動更新）。</li>
   <li>この評価は目安です。購入前には、現地・重要事項説明・ハザードマップを必ず確認してください。</li></ul></div>
   <div class="card"><h2>新駅・延伸・再開発の一覧（${D.projects.length}件）</h2>${projList(D.projects.map(q=>({q,d:0}))).replace(/<td style="white-space:nowrap">0\.0km<br>/g,'<td style="white-space:nowrap">')}</div>
   <div class="card"><h2>出典</h2><dl class="kv">${Object.entries(D.sources).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
@@ -440,9 +454,11 @@ function offlineStatus(){const el=$('#offline');if(!el)return;if(!('serviceWorke
 // ---------- 起動 ----------
 async function boot(){
   try{const r=await fetch('data.json');D=await r.json()}catch(e){$('#main').innerHTML='<div class="card">データを読み込めませんでした。電波の良い所で開き直してください。</div>';return}
-  prep();
+  prep();TX.init();
   const h=new URLSearchParams(location.hash.slice(1));
   if(h.get('d')){S.prev='list';S.detail=+h.get('d')}else if(h.get('t'))S.tab=h.get('t');
+  if(h.get('tx')){TX.mode='tx';FT.munis=h.get('tx').split(',');FT.prefs=[...new Set(FT.munis.map(c=>c.slice(0,2)))];if(h.get('types'))FT.types=h.get('types').split(',');
+    Promise.all(FT.munis.map(loadTx)).then(()=>{TX.res=null;if(h.get('k'))showTx(FT.munis[0],+h.get('k'));else go(h.get('t')||'list')})}
   if(h.get('addr')){S.tab='eval';LS.set('evalForm',{kind:h.get('kind')||'mansion',addr:h.get('addr'),price:h.get('price')||'',area:h.get('area')||'',barea:h.get('barea')||'',age:h.get('age')||'',rent:h.get('rent')||'',url:''});setTimeout(doEval,50)}
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.tab));
   render();
