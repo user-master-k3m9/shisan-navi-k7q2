@@ -176,6 +176,7 @@ function txItemHtml(o){
   return `<div class="item" onclick="showTx('${o.code}',${o.k})">
     <div class="grade g${sc?g:'D'}"><b>${sc?g:'－'}</b><small>${sc?sc.r.total+'点':'位置不明'}</small></div>
     <div style="flex:1;min-width:0">
+      <div style="color:var(--bad);font-weight:700">売却済み（${perTxt(o.per)}に${o.closed?'成約':'取引'}）</div>
       <div class="t">${esc(txTitle(o))}</div>
       <div class="m">${esc(m?m[1]:'')}${esc(o.D.n)}${o.stn?`・${esc(o.stn)}駅${o.stm!=null?' 徒歩'+o.stm+'分':''}`:''}・${perTxt(o.per)}・${o.closed?'成約':'取引'}</div>
       <div><span class="price">${man(o.price)}</span> <span class="m">${o.unit?'㎡'+unit(o.unit):''}</span></div>
@@ -216,7 +217,7 @@ function renderTxDetail(m){
   const o=f.recs[+k],sc=districtScore(o.D,code),mu=D.muni[code],rt=ratioTag(o.ratio),e=expUnit(f,o.t,o.age,o.stm);
   m.innerHTML=`<button class="back" onclick="S.detail=null;go(S.prev)">‹ 戻る</button>
   <div class="card"><div class="big"><div class="grade g${sc?sc.r.grade:'D'}"><b>${sc?sc.r.grade:'－'}</b><small>${sc?sc.r.total+'点':''}</small></div>
-    <div><div style="font-weight:700">${esc(txTitle(o))}</div><div class="note">${esc(mu?mu[0]+' '+mu[1]:'')}${esc(o.D.n)}・${perTxt(o.per)}に${o.closed?'成約':'取引'}</div>
+    <div><div style="color:var(--bad);font-weight:700">売却済み（${perTxt(o.per)}に${o.closed?'成約':'取引'}）</div><div style="font-weight:700">${esc(txTitle(o))}</div><div class="note">${esc(mu?mu[0]+' '+mu[1]:'')}${esc(o.D.n)}・${perTxt(o.per)}に${o.closed?'成約':'取引'}</div>
     <div class="tags">${rt?`<span class="tag ${rt[1]}">${rt[0]}</span>`:''}${bldTags(o).map(([x,c])=>`<span class="tag ${c}">${esc(x)}</span>`).join('')}${sc?sc.r.tags.filter(x=>!/^駅徒歩/.test(x[0])).map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join(''):''}</div></div></div>
     <div class="boxes">
       <div class="box"><small>価格</small><b>${man(o.price)}</b></div>

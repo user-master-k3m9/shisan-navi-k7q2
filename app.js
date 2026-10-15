@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v14';
+const VER='v15';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -210,6 +210,7 @@ function itemHtml(p){
   return `<div class="item" onclick="showDetail(${p.i})">
     <div class="grade g${g}"><b>${g}</b><small>${p.r.total}点</small></div>
     <div style="flex:1;min-width:0">
+      <div style="color:var(--bad);font-weight:700">売り物件ではありません（国の価格調査地点）</div>
       <div class="t">${esc(p.a.replace(/^(東京都|神奈川県|埼玉県|千葉県|茨城県|栃木県|群馬県)\s*/,''))}</div>
       <div class="m">${esc(p.sn)}駅 徒歩${walkMin(p.sd)}分・${p.cat}・${p.s==='公示'?'公示2026':'調査2025'}・${esc(p.z||'')}</div>
       <div><span class="price">${unit(p.pr)}/㎡</span> <span class="m">坪${unit(Math.round(p.pr*3.30579))}・前年比${p.yo>=0?'+':''}${p.yo}%</span></div>
