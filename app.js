@@ -1,7 +1,7 @@
 // 資産価値ナビ 関東
-const VER='v17';
+const VER='v18';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
-const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
+const S={tab:'home',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
 const PREFS=[['13','東京都','tokyo'],['14','神奈川県','kanagawa'],['11','埼玉県','saitama'],['12','千葉県','chiba'],['08','茨城県','ibaraki'],['09','栃木県','tochigi'],['10','群馬県','gunma']];
 const DEF={prefs:['13'],munis:[],q:'',use:'all',pmin:'',pmax:'',walk:0,grade:'',noFlood:false,noSlide:false,noSea:false,proj:false,up:false,popUp:false};
@@ -139,9 +139,10 @@ function go(t){S.tab=t;S.detail=null;document.querySelectorAll('#tabs button').f
 function render(){
   const m=$('#main');
   if(S.detail!=null)return (typeof S.detail==='string'?renderTxDetail:renderDetail)(m);
+  if(S.tab==='search'||S.tab==='list'||S.tab==='map'){if(!S.allowOld){S.tab='home';return renderHome(m)}}
   if(TX.mode==='sale'&&['search','list','map'].includes(S.tab))return ({search:renderSaleSearch,list:renderSaleList,map:renderSaleMap})[S.tab](m);
   if(TX.mode==='tx'&&['search','list','map'].includes(S.tab))return ({search:renderTxSearch,list:renderTxList,map:renderTxMap})[S.tab](m);
-  ({search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav,links:renderLinks})[S.tab](m);
+  ({home:renderHome,search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav,links:renderLinks})[S.tab](m);
 }
 
 // ---------- さがす ----------
@@ -476,7 +477,7 @@ function showEval(x){
 }
 function saveEval(){const x=S.evalRes;if(!x)return;let l=LS.get('evals',[]);
   if(x.e.url)l=l.filter(v=>v.e.url!==x.e.url);// 同じ物件は新しい評価で置き換える
-  l.unshift({e:x.e,title:x.g.title,grade:x.r.grade,total:x.r.total,ratio:x.val?x.val.ratio:null,date:x.date,stn:x.st?x.st.n:''});LS.set('evals',l.slice(0,200));renderEval($('#main'))}
+  l.unshift({e:x.e,title:x.g.title,grade:x.r.grade,total:x.r.total,ratio:x.val?x.val.ratio:null,date:x.date,stn:x.st?x.st.n:''});LS.set('evals',l.slice(0,200));render()}
 const ESORT={score:['評価が高い順',(a,b)=>b.total-a.total],cheap:['割安な順',(a,b)=>(a.ratio??9)-(b.ratio??9)],price:['安い順',(a,b)=>(+a.e.price||9e9)-(+b.e.price||9e9)],new:['登録が新しい順',(a,b)=>(b.date||'').localeCompare(a.date||'')],station:['駅ごと',(a,b)=>stCmp(a.stn,b.stn)]};
 function siteName(u){return /suumo/.test(u)?'SUUMO':/athome/.test(u)?'アットホーム':/homes\.co\.jp/.test(u)?"LIFULL HOME'S":/rakumachi/.test(u)?'楽待':/kenbiya/.test(u)?'健美家':/yahoo/.test(u)?'Yahoo!不動産':'物件ページ'}
 function evalSavedHtml(){const l0=LS.get('evals',[]);if(!l0.length)return'';
@@ -488,14 +489,13 @@ function evalSavedHtml(){const l0=LS.get('evals',[]);if(!l0.length)return'';
   <div><span class="price">${v.e.price?man(v.e.price*1e4):''}</span>${v.ratio?` <span class="tag ${v.ratio<0.85?'good':v.ratio>1.15?'bad':''}">相場比${(v.ratio*100).toFixed(0)}%</span>`:''} <span class="m">${v.date}</span></div></div>
   <div style="flex-basis:100%;display:flex;gap:8px;margin-top:8px">${cleanUrl(v.e.url)?`<a class="btn sm" style="flex:1" href="${esc(cleanUrl(v.e.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${siteName(cleanUrl(v.e.url))}で物件を見る ↗</a>`:`<span class="note" style="flex:1">${v.e.url?'URLが読み取れません。もう一度登録してください':'URL未登録'}</span>`}
   <button class="chip" onclick="event.stopPropagation();delEval(${i})">削除</button></div></div>`).join('')}</div>`}
-function reEval(i){const v=LS.get('evals',[])[i];LS.set('evalForm',v.e);S.evalRes=null;renderEval($('#main'));doEval()}
-function delEval(i){const l=LS.get('evals',[]);l.splice(i,1);LS.set('evals',l);renderEval($('#main'))}
+function reEval(i){const v=LS.get('evals',[])[i];go('home');setTimeout(()=>runEval(v.e),50)}
+function delEval(i){const l=LS.get('evals',[]);l.splice(i,1);LS.set('evals',l);render()}
 
 // ---------- 保存 ----------
 function renderFav(m){
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.remove('on'));
   const f=LS.get('fav',[]),ps=P.filter(p=>f.includes(p.i));
-  m.innerHTML=`${evalSavedHtml()||'<div class="card"><h2>気になる物件リスト</h2><div class="note">まだありません。「物件を評価」でSUUMOなどの物件を登録すると、ここから物件ページへ直接飛べます。</div></div>'}<h2>保存した地点</h2>${ps.map(itemHtml).join('')||'<div class="card">まだありません。地点の詳しい画面で「☆ 保存する」を押すとここに入ります。</div>'}`;
+  m.innerHTML=`${evalSavedHtml()||'<div class="card"><h2>気になる物件リスト</h2><div class="note">まだありません。「評価・さがす」で物件を評価して「☆ 気になる物件リストに保存」を押すと、ここに点数順で並び、物件ページへ直接飛べます。</div></div>'}`;
 }
 
 // ---------- 情報 ----------
