@@ -6,7 +6,7 @@ let FT=Object.assign({},TDEF,LS.get('txfilter',{}));
 const TX={
   mode:'tx',files:{},res:null,news:null,PI:{},
   init(){
-    TX.mode=LS.get('mode',Object.keys(D.txindex||{}).length?'tx':'point');
+    TX.mode=LS.get('mode','sale');if(!LS.get('v16mode',false)){TX.mode='sale';LS.set('mode','sale');LS.set('v16mode',true)}
     idbGet('txidx').then(v=>{TX.localIdx=v||{};if(Object.keys(TX.localIdx).length&&TX.mode==='tx'&&S.tab==='search'&&S.detail==null)render()}).catch(()=>{});
     for(const p of P)TX.PI[p.i]=p;
     fetch('news.json').then(r=>r.ok?r.json():null).then(j=>{if(j){TX.news=j;if(S.tab==='info'||S.detail!=null)render()}}).catch(()=>{});
@@ -14,7 +14,8 @@ const TX={
 };
 function setMode(m){TX.mode=m;LS.set('mode',m);results=null;TX.res=null;render()}
 function modeSwitch(){
-  return `<div class="seg" style="display:flex;margin-bottom:10px"><button style="flex:1" class="${TX.mode==='tx'?'on':''}" onclick="setMode('tx')">売買事例（実際の価格）</button><button style="flex:1" class="${TX.mode!=='tx'?'on':''}" onclick="setMode('point')">地価地点（土地の値段）</button></div>`;
+  const b=(k,n)=>`<button style="flex:1;font-size:13px;padding:8px 4px" class="${TX.mode===k?'on':''}" onclick="setMode('${k}')">${n}</button>`;
+  return `<div class="seg" style="display:flex;margin-bottom:10px">${b('sale','売り出し中')}${b('tx','売れた価格')}${b('point','地価地点')}</div>`;
 }
 const qNow=()=>{let mx=0;for(const v of Object.values(allIdx()))mx=Math.max(mx,v[1]);return mx};
 function allIdx(){const o=Object.assign({},D.txindex||{});for(const [c,v] of Object.entries(TX.localIdx||{}))if(!o[c]||v[1]>o[c][1])o[c]=v;return o}

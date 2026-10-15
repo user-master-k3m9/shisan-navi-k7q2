@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v15';
+const VER='v16';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -31,7 +31,7 @@ let PJ=null;
 function projYear(q){const t=String(q.year||'');if(/継続|完成|開業済/.test(t)&&!/\d{4}/.test(t))return new Date().getFullYear();
   const m=t.match(/(\d{4})/);if(!m)return null;let y=+m[1];if(/年代/.test(t))y+=/前半/.test(t)?2:/半ば|中頃/.test(t)?5:/後半/.test(t)?8:/以降/.test(t)?5:3;return y}
 // 一覧の札：近くの主な計画
-function pjLine(r){const p=r&&r.pj;if(!p)return'';const byY=(TX.mode==='tx'?tsort:S.sort)==='pjyear',x=byY&&p.yq?p.yq:p.top;if(!x)return'';const q=x.q;
+function pjLine(r){const p=r&&r.pj;if(!p)return'';const byY=(TX.mode==='tx'?tsort:TX.mode==='sale'?SALE.ssort:S.sort)==='pjyear',x=byY&&p.yq?p.yq:p.top;if(!x)return'';const q=x.q;
   return `<div class="m" style="color:var(--acc)">${q.type==='st'?'🚉':'🏗'} ${esc(q.name)}（${(x.d/1000).toFixed(1)}km・${esc(q.year)}）</div>`}
 const pjCmpV=(a,b)=>((b&&b.pj?b.pj.v:0)-(a&&a.pj?a.pj.v:0));
 const pjCmpY=(a,b)=>{const x=a&&a.pj&&a.pj.yr,y=b&&b.pj&&b.pj.yr;if(x==null&&y==null)return 0;if(x==null)return 1;if(y==null)return -1;return x-y};
@@ -139,6 +139,7 @@ function go(t){S.tab=t;S.detail=null;document.querySelectorAll('#tabs button').f
 function render(){
   const m=$('#main');
   if(S.detail!=null)return (typeof S.detail==='string'?renderTxDetail:renderDetail)(m);
+  if(TX.mode==='sale'&&['search','list','map'].includes(S.tab))return ({search:renderSaleSearch,list:renderSaleList,map:renderSaleMap})[S.tab](m);
   if(TX.mode==='tx'&&['search','list','map'].includes(S.tab))return ({search:renderTxSearch,list:renderTxList,map:renderTxMap})[S.tab](m);
   ({search:renderSearch,list:renderList,map:renderMap,eval:renderEval,info:renderInfo,fav:renderFav,links:renderLinks})[S.tab](m);
 }
@@ -352,8 +353,9 @@ function renderEval(m){
   <div class="note">SUUMO・アットホームなどで見つけた物件を登録すると、評価（100点満点）と相場との比較を出し、「気になる物件リスト」から物件ページへ直接飛べるようにします。</div>
   <label class="f">① 物件ページのURL</label>
   <div class="row"><input type="text" id="e_url" value="${esc(e.url)}" placeholder="https://suumo.jp/... や https://www.athome.co.jp/..." onchange="this.value=cleanUrl(this.value)||this.value;urlNote()"><button class="btn sm sub" style="flex:0 0 auto" onclick="pasteTo('e_url')">貼り付け</button></div>
+  <button class="btn sm" style="margin-top:6px" onclick="evalByUrl()">URLだけで評価（Macが物件ページを読みます）</button>
   <div id="e_urlnote" class="note">${urlNoteText(e.url)}</div>
-  <label class="f">② 物件ページの「物件概要」の文章を貼る（任意・自動で読み取ります）</label>
+  <label class="f">② Macが使えないときは、物件ページの「物件概要」の文章を貼る</label>
   <textarea id="e_text" rows="4" style="width:100%;font:inherit;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" placeholder="物件ページで「価格」「所在地」「専有面積」「築年月」などが書かれた部分を長押しで選んでコピーし、ここに貼ってください"></textarea>
   <div class="row" style="margin-top:6px"><button class="btn sm sub" onclick="pasteTo('e_text')">貼り付け</button><button class="btn sm" onclick="readListing()">読み取って評価</button></div>
   <div id="e_parse" class="note" style="margin-top:4px"></div>
