@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v16';
+const VER='v17';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -536,6 +536,7 @@ async function boot(){
   if(h.get('d')){S.prev='list';S.detail=+h.get('d')}else if(h.get('t'))S.tab=h.get('t');
   if(h.get('tx')){TX.mode='tx';FT.munis=h.get('tx').split(',');FT.prefs=[...new Set(FT.munis.map(c=>c.slice(0,2)))];if(h.get('types'))FT.types=h.get('types').split(',');
     Promise.all(FT.munis.map(loadTx)).then(()=>{TX.res=null;if(h.get('k'))showTx(FT.munis[0],+h.get('k'));else go(h.get('t')||'list')})}
+  if(h.get('import')){setTimeout(()=>importFromHash(h.get('import')),50)}
   if(h.get('addr')){S.tab='eval';LS.set('evalForm',{kind:h.get('kind')||'mansion',addr:h.get('addr'),price:h.get('price')||'',area:h.get('area')||'',barea:h.get('barea')||'',age:h.get('age')||'',rent:h.get('rent')||'',url:''});setTimeout(doEval,50)}
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.tab));
   render();

@@ -34,8 +34,8 @@ async function askMac(type,body,onStep){
 const SKIND={m:['中古マンション','mansion'],h:['中古一戸建て','house'],l:['土地','land']};
 function renderSaleSearch(m){
   const munis=Object.entries(D.muni).filter(([c])=>c.slice(0,2)===FS.pref&&P.some(p=>p.c===c)).sort((a,b)=>a[0].localeCompare(b[0]));
-  m.innerHTML=modeSwitch()+`<div class="card"><h2>売り出し中の物件をさがす（SUUMO）</h2>
-  <div class="note">押すと、このMacがSUUMOの一覧を読み、評価と相場比を付けてこのiPhoneにだけ届けます（暗号化。公開ページには載りません）。Macの電源が入っている必要があります。</div>
+  m.innerHTML=modeSwitch()+(SALE.items?`<button class="btn sub" style="margin-bottom:10px" onclick="go('list')">前回の結果を見る（${SALE.items.length}件・${esc(SALE.at)}）</button>`:'')+`<div id="s_msg" class="note" style="margin-bottom:8px"></div>`+bookmarkletBox()+`<div class="card"><h2>Macを使って条件でさがす</h2>
+  <div class="note">Macの電源が入っているときは、条件を選ぶだけで、MacがSUUMOの一覧を読んで評価を付けて届けます（暗号化。公開ページには載りません）。</div>
   <label class="f">種類</label><div class="chips">${Object.entries(SKIND).map(([k,[n]])=>`<button class="chip ${FS.t===k?'on':''}" onclick="FS.t='${k}';renderSaleSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">都県</label><div class="chips">${PREFS.map(([c,n])=>`<button class="chip ${FS.pref===c?'on':''}" onclick="FS.pref='${c}';FS.codes=[];renderSaleSearch($('#main'))">${n}</button>`).join('')}</div>
   <label class="f">市区町村（1〜5つ選ぶ）</label>
@@ -48,8 +48,7 @@ function renderSaleSearch(m){
   ${[['cheap','相場より割安（相場の90%未満）'],['noFlood','洪水・高潮・津波の浸水想定なし'],['noSlide','土砂災害の区域外'],['noLiq','液状化しやすい地形を除く'],['noFire','火災危険度3以上を除く（東京都）']].map(([k,n])=>`<label class="ck"><input type="checkbox" ${FS[k]?'checked':''} onchange="FS.${k}=this.checked;SALE.res=null">${n}</label>`).join('')}
   <label class="f">読む件数</label><div class="chips">${[[1,'最大50件'],[2,'最大100件'],[4,'最大200件']].map(([k,n])=>`<button class="chip ${FS.pages==k?'on':''}" onclick="FS.pages=${k};renderSaleSearch($('#main'))">${n}</button>`).join('')}</div>
   <div style="height:12px"></div><button class="btn" id="s_go" onclick="doSaleSearch()">売り出し中の物件をさがす</button>
-  <div id="s_msg" class="note" style="margin-top:6px"></div>
-  ${SALE.items?`<div style="height:8px"></div><button class="btn sub" onclick="go('list')">前回の結果を見る（${SALE.items.length}件・${esc(SALE.at)}）</button>`:''}</div>`;
+</div>`;
   for(const k of ['kb','kt','mb','mt']){const el=$('#s_'+k);if(el)el.onchange=e=>{FS[k]=e.target.value}}
 }
 async function doSaleSearch(){
@@ -70,12 +69,13 @@ async function doSaleSearch(){
 // 1件ずつ：位置→災害・地震→相場と比べて評価（結果は端末に覚えておく）
 async function scoreSale(items,prog){
   const cache=(await idbGet('sale:geo').catch(()=>null))||{};let i=0;
-  for(const c of [...new Set(items.map(x=>{const g=FS.codes.find(c=>D.muni[c]&&x.addr.includes(D.muni[c][1]));return g||FS.codes[0]}))])await loadTx(c).catch(()=>null);
+  for(const x of items)x.code=codeFromAddr(x.addr)||FS.codes.find(c=>D.muni[c]&&x.addr.includes(D.muni[c][1]))||FS.codes[0];
+  for(const c of [...new Set(items.map(x=>x.code).filter(Boolean))])await loadTx(c).catch(()=>null);
   const work=async x=>{
     try{
       let g=cache[x.addr];
       if(!g){const a=await geocode(x.addr);const [hz,qk]=await Promise.all([hazardAt(a.lat,a.lon),quakeAt(a.lat,a.lon)]);g={lat:a.lat,lon:a.lon,title:a.title,hz,qk};cache[x.addr]=g}
-      const code=FS.codes.find(c=>D.muni[c]&&x.addr.includes(D.muni[c][1]))||FS.codes[0];
+      const code=x.code;
       const age=x.by?Math.max(0,new Date().getFullYear()-x.by):'';
       const e={kind:SKIND[x.t][1],price:x.price?String(x.price):'',area:x.area?String(x.area):'',barea:x.barea?String(x.barea):'',age:age===''?'':String(age),stn:x.stn,walk:x.walk!=null?String(x.walk):'',plan:x.plan,url:x.url};
       const ev=evaluate(e,{lat:g.lat,lon:g.lon,title:g.title,qk:g.qk},g.hz,code);
@@ -153,3 +153,46 @@ async function evalByUrl(){
     $('#e_text').value=r.text;readListing();
   }catch(e){msg.textContent=e.message||String(e)}
 }
+
+// ---------- Macなし：Safariのブックマーク（ブックマークレット）から取り込む ----------
+// SUUMOを見ているSafariが、表示中のページから物件を読み取り、このアプリに渡す（端末の中だけで完結）
+const APP_URL='https://user-master-k3m9.github.io/shisan-navi-k7q2/';
+const BOOKMARKLET="javascript:(()=>{const A='"+APP_URL+"';const t=s=>(s||'').replace(/\\s+/g,' ').trim();const u=[...document.querySelectorAll('.property_unit')];let d;"+
+ "if(u.length){d={t:'list',items:u.map(e=>{const o={};const a=e.querySelector('a[href*=\"/nc_\"]');o.url=a?a.href:'';e.querySelectorAll('dl').forEach(l=>{const k=l.querySelector('dt'),v=l.querySelector('dd');if(k&&v&&!(t(k.innerText) in o))o[t(k.innerText)]=t(v.innerText)});const im=e.querySelector('img[rel]');if(im)o.img=im.getAttribute('rel');return o}).filter(o=>o.url)}}"+
+ "else{const L=document.body.innerText.split('\\n');const k=[];L.forEach((x,i)=>{if(/価格|所在地|住所|専有面積|土地面積|建物面積|築年月|間取り|徒歩|交通|物件名/.test(x)){k.push(x,L[i+1]||'')}});d={t:'page',url:location.href,text:k.join('\\n').slice(0,6000)}}"+
+ "location.href=A+'#import='+btoa(unescape(encodeURIComponent(JSON.stringify(d))))})()";
+function priceMan(s){s=String(s||'').normalize('NFKC').replace(/,/g,'');const m=s.match(/(?:(\d+)億)?\s*(\d+)?\s*万/);if(m&&(m[1]||m[2]))return (+(m[1]||0))*10000+(+(m[2]||0));const o=s.match(/(\d+)億/);return o?(+o[1])*10000:null}
+function numOf(s){const m=String(s||'').normalize('NFKC').match(/[\d.]+/);return m?+m[0]:null}
+function fromPage(o){// SUUMO一覧の1件 → アプリの形
+  const st=String(o['沿線・駅']||'').normalize('NFKC'),m=st.match(/「([^」]+)」\s*(?:徒歩|歩)\s*(\d+)\s*分/),by=String(o['築年月']||'').match(/(\d{4})年/);
+  const t=/\/ms\//.test(o.url)?'m':/ikkodate/.test(o.url)?'h':/tochi/.test(o.url)?'l':'m';
+  return {t,url:o.url,name:o['物件名']||'',price:priceMan(o['販売価格']||o['価格']),addr:String(o['所在地']||'').normalize('NFKC'),stn:m?m[1]:'',walk:m?+m[2]:null,line:st,
+    area:numOf(o['専有面積']||o['土地面積']),barea:numOf(o['建物面積']),plan:String(o['間取り']||'').normalize('NFKC'),by:by?+by[1]:null,img:o.img||''};
+}
+// 住所から市区町村コード（長い名前から先に照合。「川崎市中原区」が「中原区」より優先）
+function codeFromAddr(a){a=String(a||'').normalize('NFKC');const ms=Object.entries(D.muni).filter(([c,v])=>v[1]&&a.includes(v[1])&&a.includes(v[0].replace(/[都県]$/,'')));
+  ms.sort((x,y)=>y[1][1].length-x[1][1].length);return ms.length?ms[0][0]:null}
+async function importFromHash(b64v){
+  let d;try{d=JSON.parse(decodeURIComponent(escape(atob(String(b64v).replace(/ /g,"+")))))}catch(e){return}
+  history.replaceState(null,'',location.pathname);
+  if(d.t==='page'){S.tab='eval';const e=LS.get('evalForm',{kind:'mansion'});e.url=d.url;LS.set('evalForm',e);S.evalRes=null;render();
+    setTimeout(()=>{$('#e_url').value=d.url;$('#e_text').value=d.text;readListing()},100);return}
+  const items=(d.items||[]).map(fromPage).filter(x=>x.addr);
+  const seen=new Set();const out=items.filter(x=>{const k=[x.name,x.price,x.area,x.plan,x.addr].join('|');if(seen.has(k))return false;seen.add(k);return true});
+  TX.mode='sale';LS.set('mode','sale');S.tab='search';render();
+  const msg=$('#s_msg');if(msg)msg.textContent=`SUUMOから${out.length}件を受け取りました。評価しています…`;
+  await scoreSale(out,(i,n)=>{const m=$('#s_msg');if(m)m.textContent=`評価しています… ${i}/${n}（災害・地震・相場を調べています）`});
+  SALE.items=out;SALE.at=new Date().toLocaleString('ja-JP');SALE.res=null;await idbSet('sale:last',{items:out,at:SALE.at}).catch(()=>{});
+  shown=40;go('list');
+}
+function bookmarkletBox(){
+  return `<div class="card"><h2>Macなしで使う（Safariのボタン）</h2>
+  <div class="note">SUUMOの検索結果や物件ページをSafariで開いたまま、ブックマークの「資産価値ナビで評価」を押すと、表示中の物件がこのアプリで評価されます。最初に1回だけ、次の準備をしてください。</div>
+  <ol class="note" style="font-size:13px;padding-left:18px;margin:8px 0">
+  <li>下の「ボタンの中身をコピー」を押す</li>
+  <li>Safariでどのページでもいいので開き、共有ボタン →「ブックマークを追加」→ 名前を「資産価値ナビで評価」にして保存</li>
+  <li>ブックマーク一覧を開き「編集」→ いま保存したブックマークを選ぶ → アドレス欄を全部消して、コピーした中身を貼り付け →「完了」</li>
+  <li>あとはSUUMOで検索結果か物件ページを開き、ブックマークから「資産価値ナビで評価」を押すだけ</li></ol>
+  <button class="btn sm" onclick="copyBm()">ボタンの中身をコピー</button> <span id="bm_msg" class="note"></span></div>`;
+}
+async function copyBm(){try{await navigator.clipboard.writeText(BOOKMARKLET);$('#bm_msg').textContent='コピーしました'}catch(e){prompt('長押しで全部選んでコピーしてください',BOOKMARKLET)}}
