@@ -1,5 +1,5 @@
 // 資産価値ナビ 関東
-const VER='v13';
+const VER='v14';
 let D=null,P=[],map=null,mapLayers={},results=null,shown=40;
 const S={tab:'search',detail:null,prev:'list',sort:'score',evalRes:null};
 const LS={get(k,d){try{const v=localStorage.getItem('shisan-'+k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem('shisan-'+k,JSON.stringify(v))}catch(e){}}};
@@ -350,7 +350,8 @@ function renderEval(m){
   m.innerHTML=`<div class="card"><h2>気になる物件を登録して評価</h2>
   <div class="note">SUUMO・アットホームなどで見つけた物件を登録すると、評価（100点満点）と相場との比較を出し、「気になる物件リスト」から物件ページへ直接飛べるようにします。</div>
   <label class="f">① 物件ページのURL</label>
-  <div class="row"><input type="url" id="e_url" value="${esc(e.url)}" placeholder="https://suumo.jp/... や https://www.athome.co.jp/..."><button class="btn sm sub" style="flex:0 0 auto" onclick="pasteTo('e_url')">貼り付け</button></div>
+  <div class="row"><input type="text" id="e_url" value="${esc(e.url)}" placeholder="https://suumo.jp/... や https://www.athome.co.jp/..." onchange="this.value=cleanUrl(this.value)||this.value;urlNote()"><button class="btn sm sub" style="flex:0 0 auto" onclick="pasteTo('e_url')">貼り付け</button></div>
+  <div id="e_urlnote" class="note">${urlNoteText(e.url)}</div>
   <label class="f">② 物件ページの「物件概要」の文章を貼る（任意・自動で読み取ります）</label>
   <textarea id="e_text" rows="4" style="width:100%;font:inherit;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)" placeholder="物件ページで「価格」「所在地」「専有面積」「築年月」などが書かれた部分を長押しで選んでコピーし、ここに貼ってください"></textarea>
   <div class="row" style="margin-top:6px"><button class="btn sm sub" onclick="pasteTo('e_text')">貼り付け</button><button class="btn sm" onclick="readListing()">読み取って評価</button></div>
@@ -374,7 +375,8 @@ function renderEval(m){
   if(S.evalRes)showEval(S.evalRes);
 }
 function readForm(){const g=id=>{const el=$('#'+id);return el?el.value.trim():''};const e=LS.get('evalForm',{kind:'mansion'});
-  return {kind:e.kind,addr:g('e_addr'),price:g('e_price'),area:g('e_area'),barea:g('e_barea'),age:g('e_age'),rent:g('e_rent'),url:g('e_url'),stn:g('e_stn'),walk:g('e_walk'),plan:g('e_plan')}}
+  const tx=$('#e_text')?$('#e_text').value:'';
+  return {kind:e.kind,addr:g('e_addr'),price:g('e_price'),area:g('e_area'),barea:g('e_barea'),age:g('e_age'),rent:g('e_rent'),url:cleanUrl(g('e_url'))||cleanUrl(tx)||'',stn:g('e_stn'),walk:g('e_walk'),plan:g('e_plan')}}
 function evKind(k){const e=readForm();e.kind=k;LS.set('evalForm',e);S.evalRes=null;renderEval($('#main'))}
 async function geocode(q){
   const r=await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q='+encodeURIComponent(q));const j=await r.json();
@@ -458,7 +460,7 @@ function showEval(x){
     <div class="tags">${r.tags.map(([t,c])=>`<span class="tag ${c}">${esc(t)}</span>`).join('')}</div></div></div>
     ${val||e.kind==='mansion'?'<h3>価格は相場と比べてどうか</h3>'+valHtml:''}
     ${yld?`<div class="boxes">${yld}</div>`:''}${bld}
-    <h3>この物件を見る</h3>${e.url?`<a class="btn sm" style="margin-bottom:8px" target="_blank" rel="noopener" href="${esc(e.url)}">入力した物件ページを開く ↗</a>`:''}
+    <h3>この物件を見る</h3>${cleanUrl(e.url)?`<a class="btn sm" style="margin-bottom:8px" target="_blank" rel="noopener" href="${esc(cleanUrl(e.url))}">${siteName(cleanUrl(e.url))}で物件を見る ↗</a>`:''}
     ${viewLinks({lat:g.lat,lon:g.lon,code:x.code||x.nb[0][0].c,town:townOf(g.title,x.code||x.nb[0][0].c),kind:{mansion:'m',house:'h',land:'l'}[e.kind]})}
     <div style="height:10px"></div><button class="btn" onclick="saveEval()">☆ 気になる物件リストに保存</button></div>
   <div class="card"><h2>評価の内訳</h2>${scoreHtml(r)}<div class="note">駅までの距離は直線距離×1.25で見積もっています。</div></div>
@@ -481,7 +483,7 @@ function evalSavedHtml(){const l0=LS.get('evals',[]);if(!l0.length)return'';
   ${l.map(([v,i])=>`<div class="item" style="flex-wrap:wrap" onclick="reEval(${i})"><div class="grade g${v.grade}"><b>${v.grade}</b><small>${v.total}点</small></div>
   <div style="flex:1;min-width:0"><div class="t">${esc(v.title)}</div><div class="m">${({mansion:'中古マンション',house:'一戸建て',land:'土地'})[v.e.kind]}${v.e.plan?'・'+esc(v.e.plan):''}${v.e.area?'・'+v.e.area+'㎡':''}${v.e.age!==''&&v.e.age!=null?'・築'+v.e.age+'年':''}${v.stn?'・'+esc(v.stn)+'駅'+(v.e.walk?' 徒歩'+v.e.walk+'分':''):''}</div>
   <div><span class="price">${v.e.price?man(v.e.price*1e4):''}</span>${v.ratio?` <span class="tag ${v.ratio<0.85?'good':v.ratio>1.15?'bad':''}">相場比${(v.ratio*100).toFixed(0)}%</span>`:''} <span class="m">${v.date}</span></div></div>
-  <div style="flex-basis:100%;display:flex;gap:8px;margin-top:8px">${v.e.url?`<a class="btn sm" style="flex:1" href="${esc(v.e.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${siteName(v.e.url)}で物件を見る ↗</a>`:'<span class="note" style="flex:1">URL未登録</span>'}
+  <div style="flex-basis:100%;display:flex;gap:8px;margin-top:8px">${cleanUrl(v.e.url)?`<a class="btn sm" style="flex:1" href="${esc(cleanUrl(v.e.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${siteName(cleanUrl(v.e.url))}で物件を見る ↗</a>`:`<span class="note" style="flex:1">${v.e.url?'URLが読み取れません。もう一度登録してください':'URL未登録'}</span>`}
   <button class="chip" onclick="event.stopPropagation();delEval(${i})">削除</button></div></div>`).join('')}</div>`}
 function reEval(i){const v=LS.get('evals',[])[i];LS.set('evalForm',v.e);S.evalRes=null;renderEval($('#main'));doEval()}
 function delEval(i){const l=LS.get('evals',[]);l.splice(i,1);LS.set('evals',l);renderEval($('#main'))}
@@ -622,7 +624,7 @@ function rangeSel(idMin,idMax,vals,cmin,cmax,fmt){
 const manFmt=v=>v>=10000?(v/10000)+'億円':v.toLocaleString()+'万円';
 
 // ---------- 物件ページの文章から読み取る（iPhoneの中だけで処理） ----------
-async function pasteTo(id){try{const t=await navigator.clipboard.readText();if(t){$('#'+id).value=t;if(id==='e_text')readListing()}}catch(e){const m=$('#e_parse');if(m)m.textContent='自動で貼り付けできませんでした。欄を長押しして「ペースト」を選んでください。'}}
+async function pasteTo(id){try{const t=await navigator.clipboard.readText();if(t){$('#'+id).value=id==='e_url'?(cleanUrl(t)||t):t;if(id==='e_url')urlNote();if(id==='e_text')readListing()}}catch(e){const m=$('#e_parse');if(m)m.textContent='自動で貼り付けできませんでした。欄を長押しして「ペースト」を選んでください。'}}
 function parseListing(text,url){
   const t=String(text||'').normalize('NFKC').replace(/\r/g,''),o={},F=(re)=>{const m=t.match(re);return m?m:null};
   // 価格（1億2000万円 など）
@@ -649,3 +651,8 @@ function readListing(){
   $('#e_parse').textContent='読み取りました：'+got.map(k=>names[k]).join('・')+(miss.length?`（${miss.join('・')}は読み取れなかったので入れてください）`:'');
   if(!miss.length)doEval();
 }
+
+// コピーした文（「【SUUMO】物件名 https://…」など）からURLの部分だけを取り出す
+function cleanUrl(t){const m=String(t||'').normalize('NFKC').match(/https?:\/\/[^\s"'<>（）()「」、，,]+/);return m?m[0].replace(/[。．.]+$/,''):''}
+function urlNoteText(u){const c=cleanUrl(u);return u?(c?`✓ ${siteName(c)}の物件ページとして登録します`:'⚠ URLが見つかりません。物件ページの共有ボタン→「コピー」で取ったものを貼ってください'):''}
+function urlNote(){const el=$('#e_urlnote');if(el)el.textContent=urlNoteText($('#e_url').value)}
